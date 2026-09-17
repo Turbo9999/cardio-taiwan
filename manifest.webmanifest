@@ -1,0 +1,9 @@
+{
+  "name":"Cardio Taiwan",
+  "short_name":"Cardio Taiwan",
+  "start_url":".",
+  "display":"standalone",
+  "background_color":"#090b10",
+  "theme_color":"#0b0d12",
+  "lang":"zh-Hant"
+}
