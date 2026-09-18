@@ -13,7 +13,18 @@ export default async function handler(req, res) {
       },
     });
 
+    if (!response.ok) {
+      return res.status(502).json({
+        success: false,
+        error: `World Gym HTTP ${response.status}`,
+      });
+    }
+
     const html = await response.text();
+
+    // ------------------------------------------------------------
+    // 基本工具
+    // ------------------------------------------------------------
 
     const decode = (value = "") =>
       value
@@ -34,42 +45,49 @@ export default async function handler(req, res) {
         .replace(/\s+/g, " ")
         .trim();
 
-    function getAttributes(tag) {
+    const getAttributes = (tag = "") => {
       const attrs = {};
 
       const regex =
         /\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)=(["'])(.*?)\2/g;
 
-      let match;
+      let m;
 
-      while ((match = regex.exec(tag)) !== null) {
-        attrs[match[1]] = decode(match[3]);
+      while ((m = regex.exec(tag)) !== null) {
+        attrs[m[1]] = decode(m[3]);
       }
 
       return attrs;
-    }
+    };
 
     // ------------------------------------------------------------
-    // 日期
+    // 1. 找日期
     // ------------------------------------------------------------
+
+    const dateNodes = [];
+
+    const dayRegex =
+      /<input[^>]*id=["']day["'][^>]*value=["']([^"']+)["'][^>]*>/gi;
+
+    let dayMatch;
+
+    while ((dayMatch = dayRegex.exec(html)) !== null) {
+      dateNodes.push({
+        date: dayMatch[1],
+        index: dayMatch.index,
+      });
+    }
 
     const dates = [];
 
-    const dateRegex =
-      /<input[^>]*id=["']day["'][^>]*value=["']([^"']+)["'][^>]*>/gi;
-
-    let dateMatch;
-
-    while ((dateMatch = dateRegex.exec(html)) !== null) {
-      const date = dateMatch[1];
-
-      if (!dates.includes(date)) {
-        dates.push(date);
+    for (const item of dayNodes) {
+      if (!dates.includes(item.date)) {
+        dates.push(item.date);
       }
     }
 
     // ------------------------------------------------------------
-    // 找目前課表
+    // 2. 找 schedule_area
     // ------------------------------------------------------------
 
     const scheduleIndex = html.indexOf('id="schedule_area"');
@@ -84,7 +102,26 @@ export default async function handler(req, res) {
     const scheduleHtml = html.slice(scheduleIndex);
 
     // ------------------------------------------------------------
-    // 課程名稱
+    // 3. 找 class_list 的「真正開始位置」
+    // ------------------------------------------------------------
+
+    const classRegex =
+      /<div[^>]*class=["'][^"']*\bclass_list\b[^"']*["'][^>]*>/gi;
+
+    const classStarts = [];
+
+    let classMatch;
+
+    while ((classMatch = classRegex.exec(scheduleHtml)) !== null) {
+      classStarts.push({
+        index: classMatch.index,
+        openingTag: classMatch[0],
+        attributes: getAttributes(classMatch[0]),
+      });
+    }
+
+    // ------------------------------------------------------------
+    // 4. 課程名稱
     // ------------------------------------------------------------
 
     const knownClasses = [
@@ -119,6 +156,7 @@ export default async function handler(req, res) {
       "Pilates",
       "Stretch Yoga",
       "Yo Yo Stretch",
+      "BODYTURN",
       "Interval",
       "Fat Burning",
       "World Ball",
@@ -127,15 +165,13 @@ export default async function handler(req, res) {
       "Dance Party",
       "Aerobics Intro",
       "Taichi Zen Martial Arts",
-      "Yogalates",
-      "Hip Hop",
-      "Double Pop",
       "Restorative Yoga",
-      "Meridian Yoga",
       "Power Yoga",
-      "Core Stability Enhancement Training",
-      "Explosive Power Training",
-      "Sandbag Boxing Training",
+      "Yogalates",
+      "Meridian Yoga",
+      "Double Pop",
+      "Hip Hop",
+      "Total Body Sculpt",
     ];
 
     const classroomPatterns = [
@@ -148,21 +184,26 @@ export default async function handler(req, res) {
     ];
 
     // ------------------------------------------------------------
-    // 找 class_list
+    // 5. 解析每一堂課
     // ------------------------------------------------------------
-
-    const classRegex =
-      /<[^>]*class=["'][^"']*\bclass_list\b[^"']*["'][^>]*>[\s\S]*?(?=<[^>]*class=["'][^"']*\bclass_list\b[^"']*["']>|$)/gi;
 
     const classes = [];
 
-    let classMatch;
+    for (let i = 0; i < classStarts.length; i++) {
+      const current = classStarts[i];
 
-    while ((classMatch = classRegex.exec(scheduleHtml)) !== null) {
-      const block = classMatch[0];
+      const start = current.index;
+
+      const end =
+        i + 1 < classStarts.length
+          ? classStarts[i + 1].index
+          : scheduleHtml.length;
+
+      const block = scheduleHtml.slice(start, end);
 
       const text = stripHtml(block);
 
+      // 時間
       const timeMatch = text.match(
         /\b([0-2]\d:[0-5]\d)\s*\|\s*([0-2]\d:[0-5]\d)\b/
       );
@@ -171,6 +212,7 @@ export default async function handler(req, res) {
         continue;
       }
 
+      // 課程名稱
       let className = null;
 
       for (const name of knownClasses) {
@@ -180,6 +222,7 @@ export default async function handler(req, res) {
         }
       }
 
+      // 教室
       let classroom = null;
 
       for (const room of classroomPatterns) {
@@ -190,81 +233,87 @@ export default async function handler(req, res) {
       }
 
       // ----------------------------------------------------------
-      // 嘗試取得教練
+      // 教練
       // ----------------------------------------------------------
 
       let instructor = null;
 
-      const instructorText = text
-        .replace(timeMatch[0], "")
-        .replace(className || "", "")
-        .replace(classroom || "", "");
+      const teacherMatch = block.match(
+        /<div[^>]*class=["'][^"']*\bteacher\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i
+      );
 
-      const instructorParts = instructorText
-        .split(/\s+/)
-        .filter(Boolean);
-
-      if (instructorParts.length > 0) {
-        instructor = instructorParts[instructorParts.length - 1];
+      if (teacherMatch) {
+        instructor = stripHtml(teacherMatch[1]);
       }
 
       // ----------------------------------------------------------
-      // ⭐ 找 class_ribo
+      // 課程卡自己的 HTML
       // ----------------------------------------------------------
 
-      const riboMatches = [];
+      const innerClassNames = [];
 
-      const riboRegex =
-        /<[^>]*class=["'][^"']*\bclass_ribo\b[^"']*["'][^>]*>/gi;
+      const classAttrRegex =
+        /class=["']([^"']+)["']/gi;
 
-      let riboMatch;
+      let ca;
 
-      while ((riboMatch = riboRegex.exec(block)) !== null) {
-        riboMatches.push({
-          tag: riboMatch[0],
-          attributes: getAttributes(riboMatch[0]),
-        });
+      while ((ca = classAttrRegex.exec(block)) !== null) {
+        innerClassNames.push(ca[1]);
       }
 
       // ----------------------------------------------------------
-      // ⭐ 找所有可能與位置有關的元素
+      // 找所有 data-* 屬性
       // ----------------------------------------------------------
 
-      const positionalElements = [];
+      const dataAttributes = {};
 
-      const tagRegex =
-        /<(div|span|a|li|td|section|article|p)[^>]*>/gi;
+      const dataRegex =
+        /\s(data-[a-zA-Z0-9_-]+)=["']([^"']*)["']/gi;
 
-      let tagMatch;
+      let da;
 
-      while ((tagMatch = tagRegex.exec(block)) !== null) {
-        const tag = tagMatch[0];
-        const attributes = getAttributes(tag);
+      while ((da = dataRegex.exec(block)) !== null) {
+        dataAttributes[da[1]] = decode(da[2]);
+      }
 
-        const attrText = JSON.stringify(attributes).toLowerCase();
+      // ----------------------------------------------------------
+      // 找可能的日期
+      // ----------------------------------------------------------
 
-        const interesting =
-          attrText.includes("left") ||
-          attrText.includes("top") ||
-          attrText.includes("width") ||
-          attrText.includes("translate") ||
-          attrText.includes("column") ||
-          attrText.includes("day") ||
-          attrText.includes("date") ||
-          attrText.includes("week") ||
-          attrText.includes("style") ||
-          attrText.includes("data-");
+      const embeddedDates = [];
 
-        if (interesting) {
-          positionalElements.push({
-            tag,
-            attributes,
-          });
+      const embeddedDateRegex =
+        /\b20\d{2}[\/-]\d{1,2}[\/-]\d{1,2}\b/g;
+
+      let ed;
+
+      while ((ed = embeddedDateRegex.exec(block)) !== null) {
+        const d = ed[0].replace(/\//g, "-");
+
+        if (!embeddedDates.includes(d)) {
+          embeddedDates.push(d);
         }
       }
 
       // ----------------------------------------------------------
-      // 找 style 裡面的 left / width / translateX
+      // 找可能的星期 / 欄位
+      // ----------------------------------------------------------
+
+      const possibleColumnValues = [];
+
+      const allHtml = block;
+
+      const columnRegex =
+        /(?:column|col|day|weekday|week_day|weekDay)[-_a-zA-Z0-9]*=["']([^"']+)["']/gi;
+
+      let cm;
+
+      while ((cm = columnRegex.exec(allHtml)) !== null) {
+        possibleColumnValues.push(cm[1]);
+      }
+
+      // ----------------------------------------------------------
+      // 找所有 style
       // ----------------------------------------------------------
 
       const styles = [];
@@ -272,22 +321,25 @@ export default async function handler(req, res) {
       const styleRegex =
         /style=["']([^"']+)["']/gi;
 
-      let styleMatch;
+      let sm;
 
-      while ((styleMatch = styleRegex.exec(block)) !== null) {
-        const style = decode(styleMatch[1]);
+      while ((sm = styleRegex.exec(block)) !== null) {
+        const style = decode(sm[1]);
 
-        const left = style.match(
-          /(?:left|margin-left)\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%|rem)?/i
-        );
+        const left =
+          style.match(
+            /(?:^|;)\s*left\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
+          );
 
-        const width = style.match(
-          /width\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%|rem)?/i
-        );
+        const width =
+          style.match(
+            /(?:^|;)\s*width\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
+          );
 
-        const translate = style.match(
-          /translateX\s*\(\s*(-?\d+(?:\.\d+)?)\s*(px|%|rem)?/i
-        );
+        const transform =
+          style.match(
+            /translateX\s*\(\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
+          );
 
         styles.push({
           raw: style,
@@ -303,85 +355,106 @@ export default async function handler(req, res) {
                 unit: width[2] || null,
               }
             : null,
-          translateX: translate
+          translateX: transform
             ? {
-                value: Number(translate[1]),
-                unit: translate[2] || null,
+                value: Number(transform[1]),
+                unit: transform[2] || null,
               }
             : null,
         });
       }
 
+      // ----------------------------------------------------------
+      // 找父層結構
+      // ----------------------------------------------------------
+
+      const before = scheduleHtml.slice(
+        Math.max(0, start - 12000),
+        start
+      );
+
+      const parentTags = [];
+
+      const parentRegex =
+        /<(div|section|td|li|article)[^>]*class=["']([^"']+)["'][^>]*>/gi;
+
+      let pm;
+
+      while ((pm = parentRegex.exec(before)) !== null) {
+        parentTags.push({
+          tag: pm[1],
+          className: pm[2],
+          index: pm.index,
+        });
+      }
+
+      // ----------------------------------------------------------
+      // 儲存
+      // ----------------------------------------------------------
+
       classes.push({
+        index: i,
+
         startTime: timeMatch[1],
         endTime: timeMatch[2],
+
         className,
         classroom,
         instructor,
 
-        text: text.slice(0, 1000),
+        embeddedDates,
 
-        ribo: riboMatches,
+        possibleColumnValues,
 
-        positionalElements,
+        dataAttributes,
 
         styles,
 
-        // 方便我們確認原始 HTML
-        htmlPreview: block.slice(0, 5000),
+        classNames: innerClassNames,
+
+        // 最接近課程前方的父層 class
+        nearbyParents: parentTags.slice(-20),
+
+        text: text.slice(0, 900),
+
+        htmlPreview: block.slice(0, 7000),
       });
     }
 
     // ------------------------------------------------------------
-    // 去重
+    // 6. 對每堂課找「最近日期」
     // ------------------------------------------------------------
 
-    const unique = [];
+    const dateAssociationPreview = classes.slice(0, 30).map((item) => {
+      const candidateDates = [];
 
-    const seen = new Set();
-
-    for (const item of classes) {
-      const key = [
-        item.startTime,
-        item.endTime,
-        item.className,
-        item.classroom,
-        item.instructor,
-        item.text,
-      ].join("|");
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(item);
+      // HTML 裡直接出現日期
+      for (const d of item.embeddedDates) {
+        candidateDates.push({
+          date: d,
+          method: "embedded-date",
+        });
       }
-    }
+
+      return {
+        index: item.index,
+        time: `${item.startTime}-${item.endTime}`,
+        className: item.className,
+        instructor: item.instructor,
+        candidateDates,
+        possibleColumnValues: item.possibleColumnValues,
+        styles: item.styles,
+      };
+    });
 
     // ------------------------------------------------------------
-    // 統計位置資訊
+    // 7. 回傳
     // ------------------------------------------------------------
-
-    const styleSummary = [];
-
-    for (const item of unique) {
-      for (const style of item.styles) {
-        if (
-          style.left ||
-          style.width ||
-          style.translateX
-        ) {
-          styleSummary.push({
-            className: item.className,
-            time: `${item.startTime}-${item.endTime}`,
-            instructor: item.instructor,
-            style,
-          });
-        }
-      }
-    }
 
     return res.status(200).json({
       success: true,
-      version: "worldgym-position-analysis-1",
+
+      version: "worldgym-date-mapping-1",
 
       source: "World Gym Taiwan",
       branch: "台北統領",
@@ -393,15 +466,16 @@ export default async function handler(req, res) {
       dateCount: dates.length,
       dates,
 
-      classCount: unique.length,
+      classCount: classes.length,
 
-      classes: unique.slice(0, 30),
+      dateAssociationPreview,
 
-      styleSummary: styleSummary.slice(0, 50),
+      classes: classes.slice(0, 20),
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
+      version: "worldgym-date-mapping-1",
       error: error.message,
       stack: error.stack,
     });
