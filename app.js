@@ -12,6 +12,30 @@ let branches = [];
 let schedule = [];
 
 
+function worldGymBranchSlug(officialUrl){
+
+  if(!officialUrl){
+    return "";
+  }
+
+  try{
+
+    const match =
+      new URL(officialUrl).pathname.match(
+        /^\/en\/find-a-club\/([a-z0-9-]+)\/aerobics-class-schedule\/?$/i
+      );
+
+    return match ? match[1].toLowerCase() : "";
+
+  }catch(error){
+
+    return "";
+
+  }
+
+}
+
+
 // ========================================
 // 使用者目前選擇
 // 不預設任何分店
@@ -396,6 +420,57 @@ async function loadSchedule(){
 
   // 沒選日期
   if(!selectedDate){
+
+    return;
+
+  }
+
+
+  const selectedBranch =
+    branches.find(
+      branch =>
+        branch.id === selectedBranchId
+    );
+
+  const branchSlug =
+    worldGymBranchSlug(
+      selectedBranch?.official_url
+    );
+
+
+  // A branch with an official public schedule URL is read live from our
+  // serverless parser. The parser returns World Gym's class_date directly.
+  if(branchSlug){
+
+    const response =
+      await fetch(
+        `/api/sync-worldgym?branch=${encodeURIComponent(branchSlug)}&date=${encodeURIComponent(selectedDate)}`
+      );
+
+    const payload =
+      await response.json();
+
+    if(!response.ok || !payload.success){
+
+      throw new Error(
+        payload.error || "World Gym 課表載入失敗"
+      );
+
+    }
+
+    schedule =
+      payload.classes.map(
+        item => ({
+
+          time: item.startTime || "",
+          end: item.endTime || "",
+          name: item.className || "未命名課程",
+          room: item.classroom || "",
+          instructor: item.instructor || "",
+          type: item.category || ""
+
+        })
+      );
 
     return;
 
@@ -1125,6 +1200,11 @@ function classes(){
         b.id === selectedBranchId
     )?.official_url || "";
 
+  const hasLiveWorldGymSchedule =
+    Boolean(
+      worldGymBranchSlug(officialUrl)
+    );
+
 
   content.innerHTML = `
 
@@ -1339,9 +1419,11 @@ function classes(){
 
                       <br>
 
-                      本頁資料由
-                      CARDIO TAIWAN
-                      Supabase 資料庫提供。
+                      ${
+                        hasLiveWorldGymSchedule
+                          ? "本頁資料由 World Gym 公開課表即時解析。"
+                          : "本頁資料由 CARDIO TAIWAN Supabase 資料庫提供。"
+                      }
 
                       <br><br>
 
