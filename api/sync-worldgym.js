@@ -2,8 +2,11 @@ const WORLD_GYM_URL =
   "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
 
 /*
- * 清理 HTML 文字
+ * ============================================================
+ * 基本工具
+ * ============================================================
  */
+
 function cleanText(text) {
   return text
     .replace(/<[^>]*>/g, " ")
@@ -13,10 +16,7 @@ function cleanText(text) {
     .trim();
 }
 
-/*
- * 解析 HTML tag 的屬性
- */
-function parseAttributes(attributeText) {
+function parseAttributes(text) {
   const result = {};
 
   const regex =
@@ -24,121 +24,29 @@ function parseAttributes(attributeText) {
 
   let match;
 
-  while ((match = regex.exec(attributeText)) !== null) {
+  while ((match = regex.exec(text)) !== null) {
     result[match[1]] = match[2];
   }
 
   return result;
 }
 
-/*
- * 判斷 class 是否包含指定名稱
- */
-function hasClass(attrs, name) {
-  if (!attrs.class) return false;
+function hasClass(attrs, className) {
+  if (!attrs.class) {
+    return false;
+  }
 
   return attrs.class
     .split(/\s+/)
-    .includes(name);
+    .includes(className);
 }
 
 /*
- * 解析一堂課
+ * ============================================================
+ * 解析日期
+ * ============================================================
  */
-function parseClassBlock(block) {
 
-  /*
-   * 時間
-   */
-  const timeMatch =
-    block.match(
-      /class=["'][^"']*newclass_time[^"']*["'][^>]*>[\s\S]*?<div[^>]*>\s*(\d{2}:\d{2})\s*<span[^>]*>\|<\/span>\s*(\d{2}:\d{2})/i
-    );
-
-  /*
-   * 課程名稱
-   *
-   * World Gym 實際結構：
-   *
-   * newclass_type
-   *   └── a
-   *       └── BODYCOMBAT
-   */
-  const typeMatch =
-    block.match(
-      /class=["'][^"']*newclass_type[^"']*["'][^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i
-    );
-
-  /*
-   * 教室
-   */
-  const classroomMatch =
-    block.match(
-      /class=["']classroom["'][^>]*>([\s\S]*?)<\/div>/i
-    );
-
-  /*
-   * 教練
-   */
-  const teacherMatch =
-    block.match(
-      /class=["']teacher["'][^>]*>([\s\S]*?)<\/div>/i
-    );
-
-  /*
-   * 分店
-   */
-  const storeMatch =
-    block.match(
-      /class=["']class_store["'][^>]*>([\s\S]*?)<\/div>/i
-    );
-
-  return {
-
-    startTime:
-      timeMatch
-        ? timeMatch[1]
-        : null,
-
-    endTime:
-      timeMatch
-        ? timeMatch[2]
-        : null,
-
-    className:
-      typeMatch
-        ? cleanText(typeMatch[1])
-        : null,
-
-    classroom:
-      classroomMatch
-        ? cleanText(classroomMatch[1])
-        : null,
-
-    teacher:
-      teacherMatch
-        ? cleanText(teacherMatch[1])
-        : null,
-
-    store:
-      storeMatch
-        ? cleanText(storeMatch[1])
-        : null,
-
-    paid:
-      /Paid Class/i.test(block),
-
-    substitute:
-      /Substitute/i.test(block),
-
-    exclusive:
-      /Exclusive/i.test(block)
-  };
-}
-
-/*
- * 找日期 daybox
- */
 function findDays(html) {
 
   const results = [];
@@ -157,26 +65,16 @@ function findDays(html) {
         /id=["']day["'][^>]*value=["']([^"']+)["']/i
       );
 
-    const dayNameMatch =
-      block.match(
-        />(Mon|Tue|Wed|Thu|Fri|Sat|Sun)<\/div>/i
-      );
+    /*
+     * 這個網站日期名稱在 HTML 中可能不是
+     * 我們之前假設的格式，因此先保留 null。
+     */
 
     results.push({
-
-      index:
-        match.index,
-
-      date:
-        dateMatch
-          ? dateMatch[1]
-          : null,
-
-      day:
-        dayNameMatch
-          ? dayNameMatch[1]
-          : null
-
+      index: match.index,
+      date: dateMatch
+        ? dateMatch[1]
+        : null
     });
   }
 
@@ -184,62 +82,238 @@ function findDays(html) {
 }
 
 /*
- * ==========================================================
- * 核心：
- *
- * 真正追蹤 HTML 的父層結構
- * ==========================================================
+ * ============================================================
+ * 找一堂課的完整區塊
+ * ============================================================
  */
-function inspectStructure(html) {
+
+function extractClassBlock(
+  html,
+  startIndex
+) {
+
+  const nextIndex =
+    html.indexOf(
+      'class="class_list',
+      startIndex + 20
+    );
+
+  const endIndex =
+    nextIndex === -1
+      ? Math.min(
+          html.length,
+          startIndex + 20000
+        )
+      : nextIndex;
+
+  return html.slice(
+    startIndex,
+    endIndex
+  );
+}
+
+/*
+ * ============================================================
+ * 解析一堂課
+ * ============================================================
+ */
+
+function parseClassBlock(block) {
+
+  /*
+   * 時間
+   */
+  const timeMatch =
+    block.match(
+      /class=["'][^"']*\bnewclass_time\b[^"']*["'][^>]*>[\s\S]*?(\d{2}:\d{2})\s*<span[^>]*>\|<\/span>\s*(\d{2}:\d{2})/i
+    );
+
+  /*
+   * 課程名稱
+   *
+   * 實際 World Gym 結構：
+   *
+   * <div class="newclass_type">
+   *   <a ...>BODYCOMBAT®</a>
+   * </div>
+   */
+  const typeMatch =
+    block.match(
+      /<div[^>]*class=["'][^"']*\bnewclass_type\b[^"']*["'][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i
+    );
+
+  /*
+   * 如果上面沒抓到，
+   * 再用 class_boxctx 裡面的第一個 a。
+   */
+  let className = null;
+
+  if (typeMatch) {
+    className =
+      cleanText(typeMatch[1]);
+  }
+
+  if (!className) {
+
+    const fallbackMatch =
+      block.match(
+        /class=["'][^"']*\bclass_boxctx\b[^"']*["'][^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i
+      );
+
+    if (fallbackMatch) {
+      className =
+        cleanText(
+          fallbackMatch[1]
+        );
+    }
+  }
+
+  /*
+   * 教室
+   */
+  const classroomMatch =
+    block.match(
+      /<div[^>]*class=["']classroom["'][^>]*>([\s\S]*?)<\/div>/i
+    );
+
+  /*
+   * 教練
+   */
+  const teacherMatch =
+    block.match(
+      /<div[^>]*class=["']teacher["'][^>]*>([\s\S]*?)<\/div>/i
+    );
+
+  /*
+   * 分店
+   */
+  const storeMatch =
+    block.match(
+      /<div[^>]*class=["']class_store["'][^>]*>([\s\S]*?)<\/div>/i
+    );
+
+  /*
+   * 特殊標記
+   */
+  const paid =
+    /Paid Class/i.test(block);
+
+  const substitute =
+    /Substitute/i.test(block);
+
+  const exclusive =
+    /Exclusive/i.test(block);
+
+  return {
+
+    startTime:
+      timeMatch
+        ? timeMatch[1]
+        : null,
+
+    endTime:
+      timeMatch
+        ? timeMatch[2]
+        : null,
+
+    className,
+
+    classroom:
+      classroomMatch
+        ? cleanText(
+            classroomMatch[1]
+          )
+        : null,
+
+    teacher:
+      teacherMatch
+        ? cleanText(
+            teacherMatch[1]
+          )
+        : null,
+
+    store:
+      storeMatch
+        ? cleanText(
+            storeMatch[1]
+          )
+        : null,
+
+    paid,
+
+    substitute,
+
+    exclusive
+  };
+}
+
+/*
+ * ============================================================
+ * HTML 結構解析
+ *
+ * 注意：
+ * 這次從「完整 HTML」開始解析，
+ * 不從 schedule_area 中間開始。
+ * ============================================================
+ */
+
+function inspectClasses(html) {
 
   const results = [];
 
-  /*
-   * 把 HTML 切成 tag / text
-   */
   const tokenRegex =
     /<!--[\s\S]*?-->|<\/?[a-zA-Z][^>]*>/g;
 
-  let match;
-
   const stack = [];
 
-  let lastIndex = 0;
+  let match;
 
   while (
-    (match = tokenRegex.exec(html)) !== null
+    (match =
+      tokenRegex.exec(html)) !== null
   ) {
 
-    const token = match[0];
+    const token =
+      match[0];
 
     /*
-     * ------------------------------------------------------
-     * 開始 tag
-     * ------------------------------------------------------
+     * --------------------------------------------------------
+     * 開始 div
+     * --------------------------------------------------------
      */
+
     if (
       /^<div\b/i.test(token)
     ) {
 
       const attributeText =
         token
-          .replace(/^<div\b/i, "")
-          .replace(/>$/, "");
+          .replace(
+            /^<div\b/i,
+            ""
+          )
+          .replace(
+            />$/,
+            ""
+          );
 
       const attrs =
         parseAttributes(
           attributeText
         );
 
-      stack.push({
+      const node = {
 
-        tag: "div",
+        tag:
+          "div",
 
         class:
-          attrs.class || null,
+          attrs.class ||
+          null,
 
         id:
-          attrs.id || null,
+          attrs.id ||
+          null,
 
         data:
           Object.keys(attrs)
@@ -250,18 +324,24 @@ function inspectStructure(html) {
                 )
             )
             .reduce(
-              (obj, key) => {
+              (
+                obj,
+                key
+              ) => {
+
                 obj[key] =
                   attrs[key];
+
                 return obj;
+
               },
               {}
             )
-
-      });
+      };
 
       /*
-       * 如果這個 div 就是 class_list
+       * 如果這個 div 是 class_list，
+       * 先記錄「真正父層」
        */
       if (
         hasClass(
@@ -271,26 +351,35 @@ function inspectStructure(html) {
       ) {
 
         /*
-         * 找這堂課的結尾
+         * stack 此時就是
+         * class_list 的真正父層。
          */
-        const nextClass =
-          html.indexOf(
-            'class="class_list',
-            match.index + token.length
+        const parents =
+          stack.map(
+            item => ({
+              tag:
+                item.tag,
+
+              class:
+                item.class,
+
+              id:
+                item.id,
+
+              data:
+                item.data
+            })
           );
 
-        const end =
-          nextClass === -1
-            ? Math.min(
-                html.length,
-                match.index + 15000
-              )
-            : nextClass;
-
         const block =
-          html.slice(
-            match.index,
-            end
+          extractClassBlock(
+            html,
+            match.index
+          );
+
+        const data =
+          parseClassBlock(
+            block
           );
 
         results.push({
@@ -298,46 +387,36 @@ function inspectStructure(html) {
           index:
             match.index,
 
-          parents:
-            stack.map(
-              item => ({
-                tag:
-                  item.tag,
+          parents,
 
-                class:
-                  item.class,
-
-                id:
-                  item.id,
-
-                data:
-                  item.data
-              })
-            ),
-
-          data:
-            parseClassBlock(
-              block
-            )
+          data
 
         });
 
         /*
-         * 我們只需要前 20 堂
+         * 暫時只取 50 堂
          */
         if (
-          results.length >= 20
+          results.length >= 50
         ) {
           break;
         }
       }
+
+      /*
+       * 最後才 push 到 stack
+       */
+      stack.push(
+        node
+      );
     }
 
     /*
-     * ------------------------------------------------------
+     * --------------------------------------------------------
      * 關閉 div
-     * ------------------------------------------------------
+     * --------------------------------------------------------
      */
+
     else if (
       /^<\/div\s*>/i.test(token)
     ) {
@@ -348,13 +427,56 @@ function inspectStructure(html) {
         stack.pop();
       }
     }
-
-    lastIndex =
-      tokenRegex.lastIndex;
   }
 
   return results;
 }
+
+/*
+ * ============================================================
+ * 找 schedule_area 附近資訊
+ * ============================================================
+ */
+
+function findScheduleInfo(html) {
+
+  const index =
+    html.indexOf(
+      'id="schedule_area"'
+    );
+
+  if (index === -1) {
+    return null;
+  }
+
+  return {
+    index,
+
+    before:
+      html.slice(
+        Math.max(
+          0,
+          index - 5000
+        ),
+        index
+      ),
+
+    after:
+      html.slice(
+        index,
+        Math.min(
+          html.length,
+          index + 20000
+        )
+      )
+  };
+}
+
+/*
+ * ============================================================
+ * API
+ * ============================================================
+ */
 
 export default async function handler(
   req,
@@ -364,7 +486,7 @@ export default async function handler(
   try {
 
     /*
-     * 取得 World Gym 官方頁面
+     * 取得 World Gym 官方公開課表
      */
     const response =
       await fetch(
@@ -397,16 +519,22 @@ export default async function handler(
       await response.text();
 
     /*
-     * 找 schedule_area
+     * 日期
      */
-    const scheduleIndex =
-      html.indexOf(
-        'id="schedule_area"'
+    const days =
+      findDays(
+        html
       );
 
-    if (
-      scheduleIndex === -1
-    ) {
+    /*
+     * 課表區域
+     */
+    const scheduleInfo =
+      findScheduleInfo(
+        html
+      );
+
+    if (!scheduleInfo) {
 
       return res.status(200).json({
 
@@ -423,37 +551,21 @@ export default async function handler(
     }
 
     /*
-     * 只分析課表區域
+     * 解析整個 HTML
+     *
+     * 這是這一版最大的修正。
      */
-    const scheduleHtml =
-      html.slice(
-        scheduleIndex,
-        Math.min(
-          html.length,
-          scheduleIndex + 150000
-        )
+    const classes =
+      inspectClasses(
+        html
       );
 
     /*
-     * 日期
-     */
-    const days =
-      findDays(html);
-
-    /*
-     * HTML 結構
-     */
-    const structure =
-      inspectStructure(
-        scheduleHtml
-      );
-
-    /*
-     * 找出所有父層 class
+     * 把父層 class 整理出來
      */
     const parentClasses = [];
 
-    structure.forEach(
+    classes.forEach(
       item => {
 
         item.parents.forEach(
@@ -495,11 +607,6 @@ export default async function handler(
       htmlLength:
         html.length,
 
-      scheduleIndex,
-
-      scheduleHtmlLength:
-        scheduleHtml.length,
-
       /*
        * 日期
        */
@@ -512,20 +619,25 @@ export default async function handler(
        * 課程
        */
       classCount:
-        structure.length,
+        classes.length,
 
-      classes:
-        structure,
+      classes,
 
       /*
-       * 所有父層 class
+       * 父層 class
        */
       parentClasses:
         [
           ...new Set(
             parentClasses
           )
-        ]
+        ],
+
+      /*
+       * schedule_area
+       */
+      scheduleIndex:
+        scheduleInfo.index
 
     });
 
