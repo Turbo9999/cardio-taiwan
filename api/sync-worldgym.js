@@ -1,74 +1,64 @@
 export default async function handler(req, res) {
-  const url =
+  const sourceUrl =
     "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(sourceUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
       },
     });
 
+    if (!response.ok) {
+      return res.status(502).json({
+        success: false,
+        error: `World Gym returned HTTP ${response.status}`,
+      });
+    }
+
     const html = await response.text();
 
-    // ------------------------------------------------------------
-    // 基本資訊
-    // ------------------------------------------------------------
-
-    const clean = (text) =>
-      text
-        ? text
-            .replace(/<script[\s\S]*?<\/script>/gi, "")
-            .replace(/<style[\s\S]*?<\/style>/gi, "")
-            .replace(/<[^>]+>/g, " ")
-            .replace(/&nbsp;/gi, " ")
-            .replace(/&amp;/gi, "&")
-            .replace(/&quot;/gi, '"')
-            .replace(/&#39;/gi, "'")
-            .replace(/\s+/g, " ")
-            .trim()
-        : "";
-
-    const decode = (text) => {
-      return text
+    const decode = (value = "") =>
+      value
         .replace(/&nbsp;/gi, " ")
         .replace(/&amp;/gi, "&")
         .replace(/&quot;/gi, '"')
         .replace(/&#39;/gi, "'")
         .replace(/&#x27;/gi, "'")
         .replace(/&#x2F;/gi, "/");
-    };
+
+    const stripHtml = (value = "") =>
+      decode(
+        value
+          .replace(/<script[\s\S]*?<\/script>/gi, "")
+          .replace(/<style[\s\S]*?<\/style>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+      )
+        .replace(/\s+/g, " ")
+        .trim();
 
     // ------------------------------------------------------------
-    // 1. 抓所有日期
+    // 1. 找出所有日期
     // ------------------------------------------------------------
 
-    const days = [];
-
-    const dayRegex =
+    const dateMatches = [];
+    const dateRegex =
       /<input[^>]*id=["']day["'][^>]*value=["']([^"']+)["'][^>]*>/gi;
 
-    let dayMatch;
+    let match;
 
-    while ((dayMatch = dayRegex.exec(html)) !== null) {
-      days.push({
-        index: dayMatch.index,
-        date: dayMatch[1],
-      });
-    }
+    while ((match = dateRegex.exec(html)) !== null) {
+      const date = match[1];
 
-    // 去除重複日期
-    const uniqueDays = [];
-    const seenDates = new Set();
-
-    for (const day of days) {
-      if (!seenDates.has(day.date)) {
-        seenDates.add(day.date);
-        uniqueDays.push(day);
+      if (!dateMatches.some((item) => item.date === date)) {
+        dateMatches.push({
+          date,
+          index: match.index,
+        });
       }
     }
 
@@ -76,237 +66,310 @@ export default async function handler(req, res) {
     // 2. 找 schedule_area
     // ------------------------------------------------------------
 
-    const scheduleIndex = html.indexOf('id="schedule_area"');
+    const scheduleStart = html.indexOf('id="schedule_area"');
 
-    // ------------------------------------------------------------
-    // 3. 找所有 sch_classbox
-    // ------------------------------------------------------------
-
-    const classboxRegex =
-      /<[^>]*class=["'][^"']*sch_classbox[^"']*["'][^>]*>/gi;
-
-    const classboxes = [];
-
-    let boxMatch;
-
-    while ((boxMatch = classboxRegex.exec(html)) !== null) {
-      const start = boxMatch.index;
-
-      // 往後找下一個 sch_classbox
-      const nextMatch = html.slice(start + 1).search(
-        /<[^>]*class=["'][^"']*sch_classbox[^"']*["'][^>]*>/i
-      );
-
-      const end =
-        nextMatch === -1
-          ? Math.min(start + 30000, html.length)
-          : start + 1 + nextMatch;
-
-      const block = html.slice(start, end);
-
-      classboxes.push({
-        index: start,
-        length: block.length,
-        openingTag: boxMatch[0],
-        text: clean(block).slice(0, 1500),
-        datesBefore: uniqueDays
-          .filter((d) => d.index < start)
-          .slice(-10)
-          .map((d) => d.date),
+    if (scheduleStart === -1) {
+      return res.status(500).json({
+        success: false,
+        error: "找不到 schedule_area",
       });
     }
 
+    const scheduleHtml = html.slice(scheduleStart);
+
     // ------------------------------------------------------------
-    // 4. 分析每一個 sch_classbox 裡面有多少 class_list
+    // 3. 找 class_list
     // ------------------------------------------------------------
 
-    const inspectBoxes = classboxes.slice(0, 50).map((box, boxIndex) => {
-      const start = box.index;
+    const classRegex =
+      /<[^>]*class=["'][^"']*class_list[^"']*["'][^>]*>[\s\S]*?(?=<[^>]*class=["'][^"']*class_list[^"']*["']>|<\/div>\s*<\/div>\s*<\/div>)/gi;
 
-      const nextBox = classboxes[boxIndex + 1];
+    const rawClasses = [];
 
-      const end = nextBox
-        ? nextBox.index
-        : Math.min(start + 30000, html.length);
+    let classMatch;
 
-      const block = html.slice(start, end);
+    while ((classMatch = classRegex.exec(scheduleHtml)) !== null) {
+      const block = classMatch[0];
 
-      // class_list
-      const classListRegex =
-        /<[^>]*class=["'][^"']*class_list[^"']*["'][^>]*>/gi;
+      const text = stripHtml(block);
 
-      const classLists = [];
+      // ----------------------------------------------------------
+      // 時間
+      // ----------------------------------------------------------
 
-      let classListMatch;
+      const timeMatch = text.match(
+        /\b([0-2]\d:[0-5]\d)\s*\|\s*([0-2]\d:[0-5]\d)\b/
+      );
 
-      while ((classListMatch = classListRegex.exec(block)) !== null) {
-        const clsStart = classListMatch.index;
-
-        const snippet = block.slice(
-          clsStart,
-          Math.min(clsStart + 5000, block.length)
-        );
-
-        const text = clean(snippet);
-
-        // 找時間
-        const timeMatch = text.match(
-          /\b([0-2]\d:[0-5]\d)\s*\|\s*([0-2]\d:[0-5]\d)\b/
-        );
-
-        // 找教室
-        const roomMatch = text.match(
-          /(4F團體有氧教室|3F飛輪教室|團體有氧教室|飛輪教室)/
-        );
-
-        classLists.push({
-          index: clsStart,
-          time: timeMatch
-            ? {
-                start: timeMatch[1],
-                end: timeMatch[2],
-              }
-            : null,
-          classroom: roomMatch ? roomMatch[1] : null,
-          text: text.slice(0, 800),
-        });
+      if (!timeMatch) {
+        continue;
       }
 
+      const startTime = timeMatch[1];
+      const endTime = timeMatch[2];
+
       // ----------------------------------------------------------
-      // 嘗試從 classbox 的 HTML 找日期
+      // 課程名稱
       // ----------------------------------------------------------
 
-      const datesInside = [];
-
-      const datePatterns = [
-        /\b20\d{2}\/\d{2}\/\d{2}\b/g,
-        /\b20\d{2}-\d{2}-\d{2}\b/g,
+      const knownClasses = [
+        "BODYCOMBAT®",
+        "BODYPUMP®",
+        "BODYBALANCE®",
+        "BODYJAM®",
+        "BODYSTEP®",
+        "BODYATTACK®",
+        "DANCE®",
+        "Step Move",
+        "Stepforce",
+        "Latin Jam",
+        "Dance Aerobics",
+        "Total Body Sculpt",
+        "Lean Flow",
+        "Hi Low",
+        "Ball Sculpt",
+        "Jazz Dance",
+        "Zumba",
+        "MV Dance",
+        "Hip Hop",
+        "Hatha Yoga",
+        "Flow Yoga",
+        "Gentle Yoga",
+        "Yoga Basic",
+        "Yoga Ball",
+        "Pilates",
+        "Yo Chi",
+        "Yoga Aerobics",
+        "Interval",
+        "Fat Burning",
+        "World Ball",
+        "Aero Power",
+        "Freestyle Step",
+        "Dance Party",
+        "Aerobics Intro",
+        "Functional Training",
+        "Power Yoga",
+        "Taichi Zen Martial Arts",
+        "Yogalates",
+        "Stretch Yoga",
+        "Meridian Yoga",
+        "Core Stability Enhancement Training",
+        "Explosive Power Training",
+        "Sandbag Boxing Training",
       ];
 
-      for (const pattern of datePatterns) {
-        const matches = block.match(pattern) || [];
+      let className = null;
 
-        for (const date of matches) {
-          if (!datesInside.includes(date)) {
-            datesInside.push(date);
-          }
+      for (const name of knownClasses) {
+        if (text.includes(name)) {
+          className = name;
+          break;
         }
       }
 
       // ----------------------------------------------------------
-      // 找 classbox 上的 id / data-* / name 等屬性
+      // 教室
       // ----------------------------------------------------------
+
+      let classroom = null;
+
+      const classroomPatterns = [
+        "4F團體有氧教室",
+        "3F飛輪教室",
+        "2F團體有氧教室",
+        "1F團體有氧教室",
+        "團體有氧教室",
+        "飛輪教室",
+      ];
+
+      for (const room of classroomPatterns) {
+        if (text.includes(room)) {
+          classroom = room;
+          break;
+        }
+      }
+
+      // ----------------------------------------------------------
+      // 分店
+      // ----------------------------------------------------------
+
+      const storeMatch = text.match(
+        /(Taipei Tonling|台北統領|Taipei [A-Za-z]+)/
+      );
+
+      const store = storeMatch ? storeMatch[1] : "Taipei Tonling";
+
+      // ----------------------------------------------------------
+      // 取得 HTML 屬性
+      // ----------------------------------------------------------
+
+      const openingTagMatch = block.match(/^<[^>]+>/);
 
       const attributes = {};
 
-      const openingTag = box.openingTag;
+      if (openingTagMatch) {
+        const attrRegex =
+          /\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)=["']([^"']*)["']/g;
 
-      const attrRegex =
-        /\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)=["']([^"']*)["']/g;
+        let attrMatch;
 
-      let attrMatch;
-
-      while ((attrMatch = attrRegex.exec(openingTag)) !== null) {
-        const key = attrMatch[1];
-        const value = decode(attrMatch[2]);
-
-        attributes[key] = value;
+        while ((attrMatch = attrRegex.exec(openingTagMatch[0])) !== null) {
+          attributes[attrMatch[1]] = decode(attrMatch[2]);
+        }
       }
 
-      return {
-        boxIndex,
-        htmlIndex: start,
-        htmlLength: block.length,
-        attributes,
-        datesInside,
-        datesBefore: box.datesBefore,
-        classListCount: classLists.length,
-        firstClasses: classLists.slice(0, 8),
-        textPreview: clean(block).slice(0, 1500),
-      };
-    });
+      // ----------------------------------------------------------
+      // 嘗試從 style / data 欄位取得日期或欄位位置
+      // ----------------------------------------------------------
 
-    // ------------------------------------------------------------
-    // 5. 找所有 type_box
-    // ------------------------------------------------------------
+      let possibleDay = null;
+      let possibleDate = null;
+      let possibleColumn = null;
 
-    const typeBoxRegex =
-      /<[^>]*class=["'][^"']*type_box[^"']*["'][^>]*>/gi;
+      const allAttributesText = JSON.stringify(attributes);
 
-    const typeBoxes = [];
-
-    let typeMatch;
-
-    while ((typeMatch = typeBoxRegex.exec(html)) !== null) {
-      const start = typeMatch.index;
-
-      const snippet = html.slice(
-        start,
-        Math.min(start + 10000, html.length)
+      const directDateMatch = allAttributesText.match(
+        /20\d{2}[\/-]\d{2}[\/-]\d{2}/
       );
 
-      typeBoxes.push({
-        index: start,
-        openingTag: typeMatch[0],
-        text: clean(snippet).slice(0, 1200),
+      if (directDateMatch) {
+        possibleDate = directDateMatch[0].replace(/\//g, "-");
+      }
+
+      const dayMatch = allAttributesText.match(
+        /(?:day|date|weekday|week|column)[^0-9]*(\d{1,2})/i
+      );
+
+      if (dayMatch) {
+        possibleDay = Number(dayMatch[1]);
+      }
+
+      const styleMatch = allAttributesText.match(
+        /(?:left|margin-left|translateX)[^0-9-]*(-?\d+(?:\.\d+)?)/i
+      );
+
+      if (styleMatch) {
+        possibleColumn = Number(styleMatch[1]);
+      }
+
+      // ----------------------------------------------------------
+      // 教練
+      // ----------------------------------------------------------
+
+      let instructor = null;
+
+      const instructorCandidates = [
+        "伊森",
+        "鋼鋼",
+        "謝秉瑜",
+        "Daniel Wang",
+        "小八",
+        "翔翔 H",
+        "翔翔H",
+        "小智",
+        "Vivian",
+        "Kyle",
+        "Torrance",
+        "Benson",
+        "Jin",
+        "Teily",
+        "Wayne",
+        "EJ",
+        "安妮",
+        "Antonia",
+        "Hsuan",
+        "Calvin",
+        "恬恬",
+        "Xavier",
+      ];
+
+      for (const person of instructorCandidates) {
+        if (text.includes(person)) {
+          instructor = person;
+          break;
+        }
+      }
+
+      // ----------------------------------------------------------
+      // 標記
+      // ----------------------------------------------------------
+
+      const exclusive = text.includes("獨家") || text.includes("Exclusive");
+
+      const substitute =
+        text.includes("代課") || text.includes("Substitute");
+
+      rawClasses.push({
+        startTime,
+        endTime,
+        className,
+        classroom,
+        instructor,
+        store,
+        exclusive,
+        substitute,
+        possibleDate,
+        possibleDay,
+        possibleColumn,
+        attributes,
+        text: text.slice(0, 1200),
       });
     }
 
     // ------------------------------------------------------------
-    // 6. 找 schedule_area 後的前幾個 sch_classbox 原始片段
+    // 4. 去除完全重複資料
     // ------------------------------------------------------------
 
-    let schedulePreview = null;
+    const classes = [];
 
-    if (scheduleIndex !== -1) {
-      schedulePreview = clean(
-        html.slice(scheduleIndex, scheduleIndex + 20000)
-      ).slice(0, 6000);
+    const seen = new Set();
+
+    for (const item of rawClasses) {
+      const key = [
+        item.startTime,
+        item.endTime,
+        item.className,
+        item.classroom,
+        item.instructor,
+        item.text,
+      ].join("|");
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        classes.push(item);
+      }
     }
 
     // ------------------------------------------------------------
-    // 7. 找 class_list 的總數
+    // 5. 產生日期清單
     // ------------------------------------------------------------
 
-    const totalClassLists = (
-      html.match(
-        /<[^>]*class=["'][^"']*class_list[^"']*["'][^>]*>/gi
-      ) || []
-    ).length;
+    const dates = dateMatches.map((item) => item.date);
 
     // ------------------------------------------------------------
-    // 8. 回傳診斷資料
+    // 6. 回傳
     // ------------------------------------------------------------
 
     return res.status(200).json({
       success: true,
-      version: "v14",
+      version: "worldgym-sync-1",
       source: "World Gym Taiwan",
       branch: "台北統領",
-      status: response.status,
+
+      fetchedAt: new Date().toISOString(),
+
       htmlLength: html.length,
 
-      dayCount: uniqueDays.length,
-      days: uniqueDays,
+      dateCount: dates.length,
+      dates,
 
-      scheduleIndex,
+      classCount: classes.length,
 
-      totalClassLists,
-
-      schClassboxCount: classboxes.length,
-
-      typeBoxCount: typeBoxes.length,
-
-      classboxes: inspectBoxes,
-
-      typeBoxes: typeBoxes.slice(0, 20),
-
-      schedulePreview,
+      classes,
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
-      version: "v14",
       error: error.message,
       stack: error.stack,
     });
