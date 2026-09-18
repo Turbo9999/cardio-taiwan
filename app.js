@@ -1,15 +1,30 @@
 const SUPABASE_URL = "https://wylfqwzictkepnefwksx.supabase.co";
 
-// ⚠️ 把下面這串替換成你自己的 Supabase Publishable Key
+// ⚠️ 保留你目前 GitHub 裡原本的 Supabase Publishable Key
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_5ITurxoUWu2ihIkDBrzWaQ_8uFP1LxZ";
 
-// 台北統領
-const BRANCH_ID = "1d0c08d3-b6b9-473a-b76a-c6330a291888";
+// ================================
+// CARDIO TAIWAN
+// 動態分店 + 日期 + 課表版本
+// ================================
 
-// 目前先抓 2026-09-17
-const TARGET_DATE = "2026-09-17";
+// 預設分店
+let selectedBranchId = "1d0c08d3-b6b9-473a-b76a-c6330a291888";
+let selectedBranchName = "台北統領";
 
+// 預設日期
+// 目前資料庫有 2026-09-17 的測試課表
+let selectedDate = "2026-09-17";
+
+// 所有分店
+let branches = [];
+
+// 課表
 let schedule = [];
+
+// ================================
+// BADGES
+// ================================
 
 const badges = [
   ["🥊","Combat Rookie","完成 1 堂 BODYCOMBAT®",true],
@@ -20,123 +35,404 @@ const badges = [
   ["🌈","Class Collector","完成 5 種不同課程",false]
 ];
 
+// ================================
+// LOCAL STORAGE
+// ================================
+
 let xp = Number(localStorage.getItem("cq_xp") || 0);
 let completed = Number(localStorage.getItem("cq_completed") || 0);
 let streak = Number(localStorage.getItem("cq_streak") || 0);
 
+// ================================
+// DOM
+// ================================
+
 const content = document.querySelector("#content");
 const title = document.querySelector("#pageTitle");
 
+// ================================
+// TOAST
+// ================================
+
 function toast(msg){
+
   const el = document.querySelector("#toast");
+
+  if(!el) return;
+
   el.textContent = msg;
   el.classList.add("show");
-  setTimeout(() => el.classList.remove("show"), 1800);
+
+  setTimeout(() => {
+    el.classList.remove("show");
+  }, 1800);
 }
 
-async function loadSchedule(){
+// ================================
+// LOAD BRANCHES
+// 從 Supabase 取得所有分店
+// ================================
+
+async function loadBranches(){
 
   const params = new URLSearchParams({
-    select: "date,start_time,end_time,room,instructor,classes(name,category)",
-    branch_id: `eq.${BRANCH_ID}`,
-    date: `eq.${TARGET_DATE}`,
-    order: "start_time.asc"
+
+    select:
+      "id,name,city,official_url,latitude,longitude,checkin_radius",
+
+    order:
+      "city.asc,name.asc"
+
   });
 
   const response = await fetch(
-    `${SUPABASE_URL}/rest/v1/class_schedules?${params.toString()}`,
+
+    `${SUPABASE_URL}/rest/v1/branches?${params.toString()}`,
+
     {
       method: "GET",
+
       headers: {
         "apikey": SUPABASE_PUBLISHABLE_KEY,
-        "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+        "Authorization":
+          `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
       }
     }
+
   );
 
   if(!response.ok){
+
     const errorText = await response.text();
+
     throw new Error(errorText);
+
+  }
+
+  branches = await response.json();
+
+  // 如果預設分店不存在
+  // 自動選第一間分店
+
+  if(branches.length){
+
+    const exists =
+      branches.some(
+        branch => branch.id === selectedBranchId
+      );
+
+    if(!exists){
+
+      selectedBranchId = branches[0].id;
+      selectedBranchName = branches[0].name;
+
+    }
+
+  }
+
+}
+
+// ================================
+// LOAD SCHEDULE
+// 根據目前選擇的分店＋日期抓課表
+// ================================
+
+async function loadSchedule(){
+
+  if(!selectedBranchId){
+
+    schedule = [];
+    return;
+
+  }
+
+  const params = new URLSearchParams({
+
+    select:
+      "date,start_time,end_time,room,instructor,classes(name,category)",
+
+    branch_id:
+      `eq.${selectedBranchId}`,
+
+    date:
+      `eq.${selectedDate}`,
+
+    order:
+      "start_time.asc"
+
+  });
+
+  const response = await fetch(
+
+    `${SUPABASE_URL}/rest/v1/class_schedules?${params.toString()}`,
+
+    {
+      method: "GET",
+
+      headers: {
+        "apikey": SUPABASE_PUBLISHABLE_KEY,
+        "Authorization":
+          `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+      }
+    }
+
+  );
+
+  if(!response.ok){
+
+    const errorText = await response.text();
+
+    throw new Error(errorText);
+
   }
 
   const rows = await response.json();
 
   schedule = rows.map(row => ({
-    time: row.start_time ? row.start_time.slice(0,5) : "",
-    end: row.end_time ? row.end_time.slice(0,5) : "",
-    name: row.classes?.name || "未命名課程",
-    room: row.room || "",
-    instructor: row.instructor || "",
-    type: row.classes?.category || ""
+
+    time:
+      row.start_time
+      ? row.start_time.slice(0,5)
+      : "",
+
+    end:
+      row.end_time
+      ? row.end_time.slice(0,5)
+      : "",
+
+    name:
+      row.classes?.name ||
+      "未命名課程",
+
+    room:
+      row.room ||
+      "",
+
+    instructor:
+      row.instructor ||
+      "",
+
+    type:
+      row.classes?.category ||
+      ""
+
   }));
+
 }
+
+// ================================
+// CHANGE BRANCH
+// ================================
+
+async function changeBranch(branchId){
+
+  const branch =
+    branches.find(
+      branch => branch.id === branchId
+    );
+
+  if(!branch) return;
+
+  selectedBranchId = branch.id;
+  selectedBranchName = branch.name;
+
+  try{
+
+    await loadSchedule();
+
+    render("classes");
+
+    toast(`📍 已切換到 ${selectedBranchName}`);
+
+  }catch(error){
+
+    console.error(
+      "Schedule error:",
+      error
+    );
+
+    schedule = [];
+
+    render("classes");
+
+    toast("⚠️ 課表載入失敗");
+
+  }
+
+}
+
+// ================================
+// CHANGE DATE
+// ================================
+
+async function changeDate(date){
+
+  if(!date) return;
+
+  selectedDate = date;
+
+  try{
+
+    await loadSchedule();
+
+    render("classes");
+
+    toast(`📅 已切換到 ${selectedDate}`);
+
+  }catch(error){
+
+    console.error(
+      "Schedule error:",
+      error
+    );
+
+    schedule = [];
+
+    render("classes");
+
+    toast("⚠️ 課表載入失敗");
+
+  }
+
+}
+
+// ================================
+// COMPLETE WORKOUT
+// 暫時仍使用 localStorage
+// GPS 驗證之後再接
+// ================================
 
 function completeWorkout(name){
 
   xp += 300;
+
   completed += 1;
-  streak = Math.max(streak, 1);
 
-  localStorage.setItem("cq_xp", xp);
-  localStorage.setItem("cq_completed", completed);
-  localStorage.setItem("cq_streak", streak);
+  streak =
+    Math.max(streak, 1);
 
-  toast(`🎉 ${name} 完成！ +300 XP`);
+  localStorage.setItem(
+    "cq_xp",
+    xp
+  );
+
+  localStorage.setItem(
+    "cq_completed",
+    completed
+  );
+
+  localStorage.setItem(
+    "cq_streak",
+    streak
+  );
+
+  toast(
+    `🎉 ${name} 完成！ +300 XP`
+  );
 
   render("home");
+
 }
+
+// ================================
+// NAVIGATION
+// ================================
 
 function nav(tab){
 
-  localStorage.setItem("cq_tab", tab);
+  localStorage.setItem(
+    "cq_tab",
+    tab
+  );
 
   render(tab);
+
 }
 
-document.querySelectorAll("[data-tab]").forEach(button => {
+document
+  .querySelectorAll("[data-tab]")
+  .forEach(button => {
 
-  button.addEventListener("click", () => {
-    nav(button.dataset.tab);
-  });
+    button.addEventListener(
+      "click",
+      () => {
 
-});
+        nav(
+          button.dataset.tab
+        );
 
-function render(tab = "home"){
-
-  document.querySelectorAll("[data-tab]").forEach(button => {
-
-    button.classList.toggle(
-      "active",
-      button.dataset.tab === tab
+      }
     );
 
   });
 
+// ================================
+// RENDER
+// ================================
+
+function render(tab = "home"){
+
+  document
+    .querySelectorAll("[data-tab]")
+    .forEach(button => {
+
+      button.classList.toggle(
+
+        "active",
+
+        button.dataset.tab === tab
+
+      );
+
+    });
+
   const titles = {
+
     home: "首頁",
     classes: "課表",
     badges: "勳章",
     social: "社群",
     profile: "我的"
+
   };
 
-  title.textContent = titles[tab];
+  title.textContent =
+    titles[tab] || "首頁";
 
-  if(tab === "home") home();
-  if(tab === "classes") classes();
-  if(tab === "badges") badgePage();
-  if(tab === "social") social();
-  if(tab === "profile") profile();
+  if(tab === "home")
+    home();
+
+  if(tab === "classes")
+    classes();
+
+  if(tab === "badges")
+    badgePage();
+
+  if(tab === "social")
+    social();
+
+  if(tab === "profile")
+    profile();
+
 }
+
+// ================================
+// HOME
+// ================================
 
 function home(){
 
   content.innerHTML = `
+
     <section class="hero">
 
-      <div class="eyebrow">WELCOME BACK</div>
+      <div class="eyebrow">
+        WELCOME BACK
+      </div>
 
-      <h2>TURBO 👋</h2>
+      <h2>
+        TURBO 👋
+      </h2>
 
       <div class="muted">
         今天也把一點 XP 帶回家。
@@ -145,30 +441,60 @@ function home(){
       <div class="stats">
 
         <div class="stat">
-          <b>${xp.toLocaleString()}</b>
-          <small>XP</small>
+
+          <b>
+            ${xp.toLocaleString()}
+          </b>
+
+          <small>
+            XP
+          </small>
+
         </div>
 
         <div class="stat">
-          <b>Lv.${Math.floor(xp / 1000) + 1}</b>
-          <small>等級</small>
+
+          <b>
+            Lv.${Math.floor(xp / 1000) + 1}
+          </b>
+
+          <small>
+            等級
+          </small>
+
         </div>
 
         <div class="stat">
-          <b>🔥 ${streak}</b>
-          <small>Streak</small>
+
+          <b>
+            🔥 ${streak}
+          </b>
+
+          <small>
+            Streak
+          </small>
+
         </div>
 
       </div>
 
     </section>
 
+
     <section class="section">
 
       <div class="section-title">
-        <h3>🎯 今日任務</h3>
-        <span>1 / 3</span>
+
+        <h3>
+          🎯 今日任務
+        </h3>
+
+        <span>
+          1 / 3
+        </span>
+
       </div>
+
 
       <div class="quest">
 
@@ -180,7 +506,9 @@ function home(){
               DAILY QUEST
             </span>
 
-            <h3 style="margin:8px 0 3px">
+            <h3
+              style="margin:8px 0 3px"
+            >
               完成一堂有氧課
             </h3>
 
@@ -196,26 +524,35 @@ function home(){
 
         </div>
 
+
         <div class="progress">
-          <i style="width:${completed % 2 ? 100 : 35}%"></i>
+
+          <i
+            style="width:${completed % 2 ? 100 : 35}%"
+          ></i>
+
         </div>
+
 
         <button
           class="primary"
           onclick="nav('classes')"
         >
-          找今天的課
+          找課程
         </button>
 
       </div>
 
     </section>
 
+
     <section class="section">
 
       <div class="section-title">
 
-        <h3>📅 台北統領課程</h3>
+        <h3>
+          📍 ${selectedBranchName}
+        </h3>
 
         <span>
           ${schedule.length} 堂
@@ -223,19 +560,36 @@ function home(){
 
       </div>
 
+
       ${
         schedule.length
-        ? schedule.slice(0,3).map(card).join("")
-        : `<div class="muted">正在載入課表...</div>`
+
+        ? schedule
+            .slice(0,3)
+            .map(card)
+            .join("")
+
+        : `
+          <div class="muted">
+            目前沒有課程資料。
+          </div>
+        `
       }
 
     </section>
+
   `;
+
 }
+
+// ================================
+// CLASS CARD
+// ================================
 
 function card(c){
 
   return `
+
     <article class="class-card">
 
       <div class="row">
@@ -251,12 +605,18 @@ function card(c){
           </div>
 
           <div class="class-meta">
-            ${c.room} · 教練 ${c.instructor}
+
+            ${c.room}
+            · 教練 ${c.instructor}
+
             <br>
+
             ${c.type}
+
           </div>
 
         </div>
+
 
         <button
           class="ghost"
@@ -268,147 +628,370 @@ function card(c){
       </div>
 
     </article>
+
   `;
+
 }
+
+// ================================
+// CLASSES
+// ================================
 
 function classes(){
 
   content.innerHTML = `
 
-    <input
-      class="search"
-      id="q"
-      placeholder="搜尋課程，例如 BODYCOMBAT、瑜伽、飛輪"
-    >
-
-    <div class="filterbar">
-
-      <button
-        class="ghost"
-        onclick="filterClasses('all')"
-      >
-        全部
-      </button>
-
-      <button
-        class="ghost"
-        onclick="filterClasses('Les Mills')"
-      >
-        Les Mills
-      </button>
-
-      <button
-        class="ghost"
-        onclick="filterClasses('MOSSA')"
-      >
-        MOSSA
-      </button>
-
-      <button
-        class="ghost"
-        onclick="filterClasses('飛輪心率')"
-      >
-        飛輪
-      </button>
-
-      <button
-        class="ghost"
-        onclick="filterClasses('心肺肌力訓練')"
-      >
-        有氧
-      </button>
-
-    </div>
-
     <section class="section">
 
       <div class="section-title">
 
-        <h3>📍 台北統領</h3>
-
-        <span>
-          2026/09/17
-        </span>
+        <h3>
+          📍 選擇分店
+        </h3>
 
       </div>
 
-      <div id="classList">
+
+      <select
+        id="branchSelect"
+        class="search"
+        style="margin-bottom:12px"
+      >
 
         ${
-          schedule.length
-          ? schedule.map(card).join("")
-          : `<div class="muted">正在載入課表...</div>`
+          branches.length
+
+          ? branches
+              .map(branch => `
+
+                <option
+                  value="${branch.id}"
+                  ${
+                    branch.id === selectedBranchId
+                    ? "selected"
+                    : ""
+                  }
+                >
+
+                  ${
+                    branch.city
+                    ? `${branch.city} · `
+                    : ""
+                  }
+
+                  ${branch.name}
+
+                </option>
+
+              `)
+              .join("")
+
+          : `
+              <option>
+                尚無分店資料
+              </option>
+            `
         }
 
+      </select>
+
+
+      <div class="section-title">
+
+        <h3>
+          📅 選擇日期
+        </h3>
+
       </div>
 
-      <div class="source">
 
-        資料來源：World Gym Taiwan 公開有氧課表。<br>
+      <input
+        class="search"
+        id="dateSelect"
+        type="date"
+        value="${selectedDate}"
+        style="margin-bottom:18px"
+      >
 
-        本頁資料由 CARDIO TAIWAN Supabase 資料庫提供。
 
-        <br><br>
+      <input
+        class="search"
+        id="q"
+        placeholder="搜尋課程，例如 BODYCOMBAT、瑜伽、飛輪"
+      >
 
-        <a
-          href="https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule"
-          target="_blank"
-          rel="noreferrer"
+
+      <div class="filterbar">
+
+        <button
+          class="ghost"
+          onclick="filterClasses('all')"
         >
-          查看官方課表
-        </a>
+          全部
+        </button>
+
+        <button
+          class="ghost"
+          onclick="filterClasses('Les Mills')"
+        >
+          Les Mills
+        </button>
+
+        <button
+          class="ghost"
+          onclick="filterClasses('MOSSA')"
+        >
+          MOSSA
+        </button>
+
+        <button
+          class="ghost"
+          onclick="filterClasses('飛輪心率')"
+        >
+          飛輪
+        </button>
+
+        <button
+          class="ghost"
+          onclick="filterClasses('心肺肌力訓練')"
+        >
+          有氧
+        </button>
 
       </div>
+
+
+      <section class="section">
+
+        <div class="section-title">
+
+          <h3>
+            📍 ${selectedBranchName}
+          </h3>
+
+          <span>
+            ${selectedDate}
+          </span>
+
+        </div>
+
+
+        <div id="classList">
+
+          ${
+            schedule.length
+
+            ? schedule
+                .map(card)
+                .join("")
+
+            : `
+              <div class="muted">
+                這一天目前沒有課程資料。
+              </div>
+            `
+          }
+
+        </div>
+
+
+        <div class="source">
+
+          資料來源：World Gym Taiwan 公開有氧課表。
+          <br>
+
+          本頁資料由 CARDIO TAIWAN Supabase 資料庫提供。
+
+          <br><br>
+
+          ${
+            getCurrentBranchUrl()
+          }
+
+        </div>
+
+      </section>
 
     </section>
+
   `;
 
-  const search = document.querySelector("#q");
+
+  // 分店選擇
+
+  const branchSelect =
+    document.querySelector(
+      "#branchSelect"
+    );
+
+  if(branchSelect){
+
+    branchSelect.addEventListener(
+      "change",
+      event => {
+
+        changeBranch(
+          event.target.value
+        );
+
+      }
+    );
+
+  }
+
+
+  // 日期選擇
+
+  const dateSelect =
+    document.querySelector(
+      "#dateSelect"
+    );
+
+  if(dateSelect){
+
+    dateSelect.addEventListener(
+      "change",
+      event => {
+
+        changeDate(
+          event.target.value
+        );
+
+      }
+    );
+
+  }
+
+
+  // 搜尋
+
+  const search =
+    document.querySelector("#q");
 
   if(search){
 
-    search.addEventListener("input", event => {
-      filterClasses(event.target.value);
-    });
+    search.addEventListener(
+      "input",
+      event => {
+
+        filterClasses(
+          event.target.value
+        );
+
+      }
+    );
 
   }
+
 }
+
+// ================================
+// OFFICIAL BRANCH URL
+// ================================
+
+function getCurrentBranchUrl(){
+
+  const branch =
+    branches.find(
+      branch =>
+        branch.id === selectedBranchId
+    );
+
+  if(
+    branch &&
+    branch.official_url
+  ){
+
+    return `
+
+      <a
+        href="${branch.official_url}"
+        target="_blank"
+        rel="noreferrer"
+      >
+        查看官方課表
+      </a>
+
+    `;
+
+  }
+
+  return "";
+
+}
+
+// ================================
+// FILTER CLASSES
+// ================================
 
 function filterClasses(q){
 
-  const list = document.querySelector("#classList");
+  const list =
+    document.querySelector(
+      "#classList"
+    );
 
   if(!list) return;
 
-  const term = (q || "all").toLowerCase();
+  const term =
+    (q || "all")
+      .toLowerCase();
 
-  const rows = schedule.filter(c => {
+  const rows =
+    schedule.filter(c => {
 
-    return (
-      term === "all" ||
-      Object.values(c)
-        .join(" ")
-        .toLowerCase()
-        .includes(term)
-    );
+      return (
 
-  });
+        term === "all"
+
+        ||
+
+        Object
+          .values(c)
+          .join(" ")
+          .toLowerCase()
+          .includes(term)
+
+      );
+
+    });
+
 
   list.innerHTML =
-    rows.map(card).join("") ||
-    `<div class="muted">找不到符合的課程。</div>`;
+
+    rows
+      .map(card)
+      .join("")
+
+    ||
+
+    `
+      <div class="muted">
+        找不到符合的課程。
+      </div>
+    `;
+
 }
+
+// ================================
+// BADGES
+// ================================
 
 function badgePage(){
 
   const unlocked =
-    badges.filter(b => b[3]).length;
+    badges.filter(
+      b => b[3]
+    ).length;
+
 
   content.innerHTML = `
 
     <div class="section-title">
 
-      <h3>🏅 Badge Collection</h3>
+      <h3>
+        🏅 Badge Collection
+      </h3>
 
       <span>
         ${Math.min(unlocked, completed)}
@@ -417,11 +1000,18 @@ function badgePage(){
 
     </div>
 
+
     <div class="badge-grid">
 
       ${badges.map(b => `
 
-        <article class="badge ${b[3] ? "" : "locked"}">
+        <article
+          class="badge ${
+            b[3]
+            ? ""
+            : "locked"
+          }"
+        >
 
           <div class="badge-icon">
             ${b[0]}
@@ -435,14 +1025,26 @@ function badgePage(){
             ${b[2]}
           </p>
 
+
           ${
             b[3]
-            ? `<div class="pill" style="margin-top:12px">
-                 UNLOCKED
-               </div>`
-            : `<div style="margin-top:12px">
-                 🔒 LOCKED
-               </div>`
+
+            ? `
+              <div
+                class="pill"
+                style="margin-top:12px"
+              >
+                UNLOCKED
+              </div>
+            `
+
+            : `
+              <div
+                style="margin-top:12px"
+              >
+                🔒 LOCKED
+              </div>
+            `
           }
 
         </article>
@@ -450,8 +1052,14 @@ function badgePage(){
       `).join("")}
 
     </div>
+
   `;
+
 }
+
+// ================================
+// SOCIAL
+// ================================
 
 function social(){
 
@@ -461,11 +1069,16 @@ function social(){
 
       <div class="section-title">
 
-        <h3>👥 Community</h3>
+        <h3>
+          👥 Community
+        </h3>
 
-        <span>附近健身玩家</span>
+        <span>
+          附近健身玩家
+        </span>
 
       </div>
+
 
       <article class="post">
 
@@ -477,7 +1090,9 @@ function social(){
 
           <div>
 
-            <b>Kevin</b>
+            <b>
+              Kevin
+            </b>
 
             <div class="muted">
               剛剛 · 板橋
@@ -487,15 +1102,19 @@ function social(){
 
         </div>
 
+
         <p>
-          🥊 今天完成 BODYCOMBAT®！又多一個 XP。
+          🥊 今天完成 BODYCOMBAT®！
+          又多一個 XP。
         </p>
+
 
         <div class="actions">
           ♡ 18　💬 3　🏅 Combat Rookie
         </div>
 
       </article>
+
 
       <article class="post">
 
@@ -507,7 +1126,9 @@ function social(){
 
           <div>
 
-            <b>Alex</b>
+            <b>
+              Alex
+            </b>
 
             <div class="muted">
               1 小時前 · 新北
@@ -517,9 +1138,11 @@ function social(){
 
         </div>
 
+
         <p>
           🔥 連續運動 7 天，今天繼續。
         </p>
+
 
         <div class="actions">
           ♡ 12　💬 1　🔥 7 DAY STREAK
@@ -528,8 +1151,14 @@ function social(){
       </article>
 
     </section>
+
   `;
+
 }
+
+// ================================
+// PROFILE
+// ================================
 
 function profile(){
 
@@ -541,48 +1170,80 @@ function profile(){
         T
       </div>
 
+
       <h2>
         TURBO
       </h2>
+
 
       <div class="muted">
         Level ${Math.floor(xp / 1000) + 1}
       </div>
 
+
       <div class="stats">
 
         <div class="stat">
-          <b>${completed}</b>
-          <small>完成課程</small>
+
+          <b>
+            ${completed}
+          </b>
+
+          <small>
+            完成課程
+          </small>
+
         </div>
 
-        <div class="stat">
-          <b>${xp}</b>
-          <small>XP</small>
-        </div>
 
         <div class="stat">
-          <b>${streak}</b>
-          <small>Streak</small>
+
+          <b>
+            ${xp}
+          </b>
+
+          <small>
+            XP
+          </small>
+
+        </div>
+
+
+        <div class="stat">
+
+          <b>
+            ${streak}
+          </b>
+
+          <small>
+            Streak
+          </small>
+
         </div>
 
       </div>
 
     </section>
 
+
     <section class="section">
 
       <div class="section-title">
 
-        <h3>📊 我的紀錄</h3>
+        <h3>
+          📊 我的紀錄
+        </h3>
 
       </div>
+
 
       <div class="quest">
 
         <div class="row">
 
-          <b>有氧完成率</b>
+          <b>
+            有氧完成率
+          </b>
 
           <span class="xp">
             ${Math.min(100, completed * 8)}%
@@ -590,10 +1251,14 @@ function profile(){
 
         </div>
 
+
         <div class="progress">
 
           <i
-            style="width:${Math.min(100, completed * 8)}%"
+            style="width:${Math.min(
+              100,
+              completed * 8
+            )}%"
           ></i>
 
         </div>
@@ -601,33 +1266,61 @@ function profile(){
       </div>
 
     </section>
+
   `;
+
 }
+
+// ================================
+// INIT
+// ================================
 
 async function init(){
 
   try{
 
+    // 先抓分店
+
+    await loadBranches();
+
+    // 再抓課表
+
     await loadSchedule();
 
+    // 最後顯示頁面
+
     render(
-      localStorage.getItem("cq_tab") || "home"
+      localStorage.getItem(
+        "cq_tab"
+      ) || "home"
     );
 
   }catch(error){
 
-    console.error("Supabase error:", error);
+    console.error(
+      "Supabase error:",
+      error
+    );
 
+    branches = [];
     schedule = [];
 
     render(
-      localStorage.getItem("cq_tab") || "home"
+      localStorage.getItem(
+        "cq_tab"
+      ) || "home"
     );
 
-    toast("⚠️ 課表載入失敗");
+    toast(
+      "⚠️ 資料載入失敗"
+    );
 
   }
 
 }
+
+// ================================
+// START
+// ================================
 
 init();
