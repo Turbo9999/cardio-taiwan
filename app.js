@@ -3,6 +3,11 @@ const SUPABASE_URL = "https://wylfqwzictkepnefwksx.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
   "sb_publishable_5ITurxoUWu2ihIkDBrzWaQ_8uFP1LxZ";
 
+const AUTH_STORAGE_KEY = "cq_auth_session";
+let authSession = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
+let currentUser = null;
+let profileName = "";
+
 
 // ========================================
 // CARDIO TAIWAN
@@ -317,6 +322,99 @@ function injectScheduleStyles(){
 // ========================================
 // Supabase API
 // ========================================
+
+function authHeaders(){
+  return {
+    "apikey": SUPABASE_PUBLISHABLE_KEY,
+    "Authorization": `Bearer ${authSession?.access_token || SUPABASE_PUBLISHABLE_KEY}`,
+    "Content-Type": "application/json"
+  };
+}
+
+async function authRequest(path, options = {}){
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+    ...options,
+    headers: { "apikey": SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json", ...(options.headers || {}) }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if(!response.ok) throw new Error(payload.message || payload.error_description || "帳號服務暫時無法使用");
+  return payload;
+}
+
+async function saveCloudProfile(){
+  if(!currentUser || !authSession) return;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${currentUser.id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Prefer": "return=minimal" },
+    body: JSON.stringify({ display_name: profileName || currentUser.email.split("@")[0], xp, streak_days: streak })
+  });
+  if(!response.ok) throw new Error("個人資料同步失敗");
+}
+
+async function loadCloudProfile(){
+  if(!currentUser || !authSession) return;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${currentUser.id}&select=display_name,xp,streak_days`, { headers: authHeaders() });
+  if(!response.ok) return;
+  const rows = await response.json();
+  if(rows[0]){
+    profileName = rows[0].display_name || "";
+    xp = Number(rows[0].xp || 0);
+    streak = Number(rows[0].streak_days || 0);
+  }
+  const workoutResponse = await fetch(`${SUPABASE_URL}/rest/v1/workouts?user_id=eq.${currentUser.id}&select=id`, { headers: authHeaders() });
+  if(workoutResponse.ok) completed = (await workoutResponse.json()).length;
+}
+
+async function restoreSession(){
+  if(!authSession?.access_token) return;
+  try{
+    currentUser = await authRequest("user", { headers: { "Authorization": `Bearer ${authSession.access_token}` } });
+    profileName = currentUser.user_metadata?.display_name || "";
+    await loadCloudProfile();
+  }catch(error){
+    authSession = null;
+    currentUser = null;
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
+async function submitAuth(event, mode){
+  event.preventDefault();
+  const form = event.currentTarget;
+  const email = form.email.value.trim();
+  const password = form.password.value;
+  const displayName = form.display_name?.value.trim();
+  const button = form.querySelector("button");
+  button.disabled = true;
+  try{
+    const path = mode === "signup" ? "signup" : "token?grant_type=password";
+    const body = mode === "signup" ? { email, password, data: { display_name: displayName } } : { email, password };
+    const result = await authRequest(path, { method: "POST", body: JSON.stringify(body) });
+    if(!result.access_token){
+      toast("請至 Email 信箱點擊驗證連結後再登入");
+      return;
+    }
+    authSession = result;
+    currentUser = result.user;
+    profileName = currentUser.user_metadata?.display_name || displayName || "";
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authSession));
+    await saveCloudProfile();
+    toast(mode === "signup" ? "帳號建立成功！" : "登入成功！");
+    render("profile");
+  }catch(error){
+    toast(`⚠️ ${error.message}`);
+  }finally{
+    button.disabled = false;
+  }
+}
+
+async function signOut(){
+  try{ if(authSession) await authRequest("logout", { method:"POST", headers:{ "Authorization": `Bearer ${authSession.access_token}` } }); }catch(error){}
+  authSession = null; currentUser = null; profileName = "";
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  toast("已登出");
+  render("profile");
+}
 
 async function supabaseFetch(
   table,
@@ -883,7 +981,7 @@ async function refreshSchedule(){
 // 完成課程
 // ========================================
 
-function completeWorkout(name){
+async function completeWorkout(name){
 
   xp += 300;
 
@@ -910,6 +1008,20 @@ function completeWorkout(name){
     "cq_streak",
     streak
   );
+
+  if(currentUser && authSession){
+    try{
+      await saveCloudProfile();
+      await fetch(`${SUPABASE_URL}/rest/v1/workouts`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Prefer": "return=minimal" },
+        body: JSON.stringify({ user_id: currentUser.id, class_name: name, xp_awarded: 300 })
+      });
+    }catch(error){
+      console.warn("Workout sync error:", error);
+      toast("已完成課程，雲端同步稍後會再嘗試");
+    }
+  }
 
 
   toast(
@@ -1033,7 +1145,7 @@ function home(){
       </div>
 
       <h2>
-        TURBO 👋
+        ${(profileName || (currentUser ? currentUser.email.split("@")[0] : "運動夥伴"))} 👋
       </h2>
 
       <div class="muted">
@@ -2079,16 +2191,41 @@ function social(){
 
 function profile(){
 
+  if(!currentUser){
+    content.innerHTML = `
+      <section class="hero profile-card">
+        <div class="big-avatar">♧</div>
+        <h2>建立你的運動帳號</h2>
+        <div class="muted">登入後可把 XP、完成紀錄與勳章安全同步到自己的帳號。</div>
+      </section>
+      <section class="section auth-grid">
+        <form class="quest auth-form" onsubmit="submitAuth(event, 'login')">
+          <h3>登入</h3>
+          <label>Email<input name="email" type="email" autocomplete="email" required></label>
+          <label>密碼<input name="password" type="password" autocomplete="current-password" minlength="6" required></label>
+          <button class="primary" type="submit">登入帳號</button>
+        </form>
+        <form class="quest auth-form" onsubmit="submitAuth(event, 'signup')">
+          <h3>首次使用？註冊</h3>
+          <label>顯示名稱<input name="display_name" type="text" maxlength="40" required></label>
+          <label>Email<input name="email" type="email" autocomplete="email" required></label>
+          <label>密碼（至少 6 碼）<input name="password" type="password" autocomplete="new-password" minlength="6" required></label>
+          <button class="primary" type="submit">建立帳號</button>
+        </form>
+      </section>`;
+    return;
+  }
+
   content.innerHTML = `
 
     <section class="hero profile-card">
 
       <div class="big-avatar">
-        T
+        ${(profileName || currentUser.email).slice(0,1).toUpperCase()}
       </div>
 
       <h2>
-        TURBO
+        ${profileName || currentUser.email.split("@")[0]}
       </h2>
 
       <div class="muted">
@@ -2139,6 +2276,10 @@ function profile(){
 
       </div>
 
+    </section>
+
+    <section class="section">
+      <button class="ghost" onclick="signOut()">登出帳號</button>
     </section>
 
 
@@ -2202,6 +2343,9 @@ async function init(){
   try{
 
     injectScheduleStyles();
+
+    // 還原既有登入狀態；失效的工作階段會安全地回到訪客模式。
+    await restoreSession();
 
 
     // ① 載入分店
