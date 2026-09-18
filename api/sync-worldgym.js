@@ -1,9 +1,10 @@
 const WORLD_GYM_URL =
   "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
 
-function getSnippet(html, index, before = 2500, after = 8000) {
+function getSnippet(html, index, before = 1000, after = 12000) {
   const start = Math.max(0, index - before);
   const end = Math.min(html.length, index + after);
+
   return html.slice(start, end);
 }
 
@@ -21,6 +22,15 @@ function collectMatches(html, regex, limit = 100) {
   }
 
   return results;
+}
+
+function cleanText(text) {
+  return text
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export default async function handler(req, res) {
@@ -42,90 +52,176 @@ export default async function handler(req, res) {
 
     const html = await response.text();
 
-    // 找課表區域
-    const scheduleIndex = html.indexOf('id="schedule_area"');
+    /*
+     * =====================================================
+     * 1. 找 schedule_area
+     * =====================================================
+     */
 
-    // 找日期切換相關內容
-    const dayboxIndex = html.indexOf('class="daybox"');
-
-    // 找可能控制日期切換的 JavaScript / Ajax 關鍵字
-    const keywordRegex =
-      /(schedule_area|daybox|changeSchedul|dayclick|dayselect|ajax|schedule|aerobic_class_schedule)/gi;
-
-    const keywordMatches = collectMatches(
-      html,
-      keywordRegex,
-      80
+    const scheduleIndex = html.indexOf(
+      'id="schedule_area"'
     );
 
-    // 找真正的課程時間 HTML
-    const timeRegex =
-      /<div[^>]*class=["'][^"']*newclass_time[^"']*["'][^>]*>[\s\S]{0,500}?<\/div>/gi;
+    if (scheduleIndex === -1) {
+      return res.status(200).json({
+        success: false,
+        message: "找不到 schedule_area",
+        htmlLength: html.length
+      });
+    }
 
-    const timeMatches = collectMatches(
-      html,
-      timeRegex,
-      20
+    /*
+     * =====================================================
+     * 2. 只分析真正的課表區域
+     * =====================================================
+     */
+
+    const scheduleHtml = html.slice(
+      scheduleIndex,
+      Math.min(
+        html.length,
+        scheduleIndex + 150000
+      )
     );
 
-    // 找課程名稱相關區塊
-    const typeRegex =
-      /<div[^>]*class=["'][^"']*newclass_type[^"']*["'][^>]*>[\s\S]{0,1000}?<\/div>/gi;
+    /*
+     * =====================================================
+     * 3. 找 class_list
+     * =====================================================
+     */
 
-    const typeMatches = collectMatches(
-      html,
-      typeRegex,
-      20
-    );
-
-    // 找可能的 AJAX URL
-    const urlRegex =
-      /["']([^"']*(?:schedule|aerobic|class)[^"']*)["']/gi;
-
-    const urlMatches = collectMatches(
-      html,
-      urlRegex,
+    const classListMatches = collectMatches(
+      scheduleHtml,
+      /class=["'][^"']*class_list[^"']*["']/gi,
       100
     );
 
-    // 找日期切換按鈕附近的完整 HTML
-    const daySamples = [];
+    /*
+     * =====================================================
+     * 4. 找 class_inbox
+     * =====================================================
+     */
 
-    const dayRegex =
-      /<[^>]*class=["'][^"']*daybox[^"']*["'][^>]*>/gi;
+    const classInboxMatches = collectMatches(
+      scheduleHtml,
+      /class=["'][^"']*class_inbox[^"']*["']/gi,
+      100
+    );
 
-    let dayMatch;
-    let dayCount = 0;
+    /*
+     * =====================================================
+     * 5. 找課程時間
+     * =====================================================
+     */
 
-    while (
-      (dayMatch = dayRegex.exec(html)) !== null &&
-      dayCount < 5
-    ) {
-      daySamples.push({
-        number: dayCount + 1,
-        index: dayMatch.index,
-        html: getSnippet(
-          html,
-          dayMatch.index,
-          1000,
-          5000
-        )
-      });
+    const timeMatches = collectMatches(
+      scheduleHtml,
+      /<div[^>]*class=["'][^"']*newclass_time[^"']*["'][^>]*>[\s\S]{0,500}?<\/div>/gi,
+      100
+    );
 
-      dayCount++;
-    }
+    /*
+     * =====================================================
+     * 6. 找課程名稱
+     * =====================================================
+     */
 
-    // 課表區域附近 HTML
-    const scheduleSample =
-      scheduleIndex >= 0
-        ? html.slice(
-            scheduleIndex,
-            Math.min(
-              html.length,
-              scheduleIndex + 30000
-            )
+    const typeMatches = collectMatches(
+      scheduleHtml,
+      /<div[^>]*class=["'][^"']*newclass_type[^"']*["'][^>]*>[\s\S]{0,1500}?<\/div>/gi,
+      100
+    );
+
+    /*
+     * =====================================================
+     * 7. 找教室
+     * =====================================================
+     */
+
+    const classroomMatches = collectMatches(
+      scheduleHtml,
+      /class=["'][^"']*classroom[^"']*["'][^>]*>[\s\S]{0,1500}?<\/[^>]+>/gi,
+      100
+    );
+
+    /*
+     * =====================================================
+     * 8. 找 teacher / instructor
+     * =====================================================
+     */
+
+    const teacherMatches = collectMatches(
+      scheduleHtml,
+      /class=["'][^"']*(teacher|instructor)[^"']*["'][^>]*>[\s\S]{0,1500}?<\/[^>]+>/gi,
+      100
+    );
+
+    /*
+     * =====================================================
+     * 9. 每一個 class_list 的 HTML 片段
+     * =====================================================
+     */
+
+    const classListSamples =
+      classListMatches.slice(0, 20).map(
+        (item, index) => ({
+          number: index + 1,
+          relativeIndex: item.index,
+          html: getSnippet(
+            scheduleHtml,
+            item.index,
+            300,
+            7000
           )
-        : null;
+        })
+      );
+
+    /*
+     * =====================================================
+     * 10. 每一個 class_inbox 的 HTML 片段
+     * =====================================================
+     */
+
+    const classInboxSamples =
+      classInboxMatches.slice(0, 10).map(
+        (item, index) => ({
+          number: index + 1,
+          relativeIndex: item.index,
+          html: getSnippet(
+            scheduleHtml,
+            item.index,
+            300,
+            9000
+          )
+        })
+      );
+
+    /*
+     * =====================================================
+     * 11. 課表開頭 50,000 字
+     * =====================================================
+     */
+
+    const scheduleBeginning =
+      scheduleHtml.slice(0, 50000);
+
+    /*
+     * =====================================================
+     * 12. 日期 daybox
+     * =====================================================
+     */
+
+    const dayMatches = collectMatches(
+      html,
+      /<div[^>]*class=["'][^"']*daybox[^"']*["'][^>]*>[\s\S]{0,1500}?<\/div>/gi,
+      30
+    );
+
+    /*
+     * =====================================================
+     * 回傳偵察資料
+     * =====================================================
+     */
 
     return res.status(200).json({
       success: true,
@@ -135,40 +231,61 @@ export default async function handler(req, res) {
       htmlLength: html.length,
 
       scheduleIndex,
-      dayboxIndex,
 
-      timeCount: timeMatches.length,
-      timeMatches: timeMatches.map(
-        item => item.match
-      ),
+      scheduleHtmlLength:
+        scheduleHtml.length,
 
-      typeCount: typeMatches.length,
-      typeMatches: typeMatches.map(
-        item => item.match
-      ),
+      dayCount:
+        dayMatches.length,
 
-      daySamples,
+      days:
+        dayMatches.map(item =>
+          cleanText(item.match)
+        ),
 
-      interestingUrls: [
-        ...new Set(
-          urlMatches.map(item => item.match)
-        )
-      ].slice(0, 100),
+      classListCount:
+        classListMatches.length,
 
-      keywordMatches: keywordMatches.map(
-        item => ({
-          index: item.index,
-          match: item.match,
-          snippet: getSnippet(
-            html,
-            item.index,
-            500,
-            1500
-          )
-        })
-      ),
+      classInboxCount:
+        classInboxMatches.length,
 
-      scheduleSample
+      timeCount:
+        timeMatches.length,
+
+      typeCount:
+        typeMatches.length,
+
+      classroomCount:
+        classroomMatches.length,
+
+      teacherCount:
+        teacherMatches.length,
+
+      timeMatches:
+        timeMatches.slice(0, 30).map(
+          item => item.match
+        ),
+
+      typeMatches:
+        typeMatches.slice(0, 30).map(
+          item => item.match
+        ),
+
+      classroomMatches:
+        classroomMatches.slice(0, 30).map(
+          item => item.match
+        ),
+
+      teacherMatches:
+        teacherMatches.slice(0, 30).map(
+          item => item.match
+        ),
+
+      classListSamples,
+
+      classInboxSamples,
+
+      scheduleBeginning
     });
 
   } catch (error) {
