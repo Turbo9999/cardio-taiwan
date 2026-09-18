@@ -337,7 +337,7 @@ async function authRequest(path, options = {}){
     headers: { "apikey": SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json", ...(options.headers || {}) }
   });
   const payload = await response.json().catch(() => ({}));
-  if(!response.ok) throw new Error(payload.message || payload.error_description || "帳號服務暫時無法使用");
+  if(!response.ok) throw new Error(payload.message || payload.error_description || payload.msg || payload.error || "帳號服務暫時無法使用");
   return payload;
 }
 
