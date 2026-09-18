@@ -22,9 +22,9 @@ export default async function handler(req, res) {
 
     const html = await response.text();
 
-    // ------------------------------------------------------------
+    // ============================================================
     // 基本工具
-    // ------------------------------------------------------------
+    // ============================================================
 
     const decode = (value = "") =>
       value
@@ -51,18 +51,18 @@ export default async function handler(req, res) {
       const regex =
         /\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)=(["'])(.*?)\2/g;
 
-      let m;
+      let match;
 
-      while ((m = regex.exec(tag)) !== null) {
-        attrs[m[1]] = decode(m[3]);
+      while ((match = regex.exec(tag)) !== null) {
+        attrs[match[1]] = decode(match[3]);
       }
 
       return attrs;
     };
 
-    // ------------------------------------------------------------
-    // 1. 找日期
-    // ------------------------------------------------------------
+    // ============================================================
+    // 1. 找所有日期
+    // ============================================================
 
     const dateNodes = [];
 
@@ -80,15 +80,15 @@ export default async function handler(req, res) {
 
     const dates = [];
 
-    for (const item of dayNodes) {
+    for (const item of dateNodes) {
       if (!dates.includes(item.date)) {
         dates.push(item.date);
       }
     }
 
-    // ------------------------------------------------------------
-    // 2. 找 schedule_area
-    // ------------------------------------------------------------
+    // ============================================================
+    // 2. 找課表區域
+    // ============================================================
 
     const scheduleIndex = html.indexOf('id="schedule_area"');
 
@@ -101,9 +101,9 @@ export default async function handler(req, res) {
 
     const scheduleHtml = html.slice(scheduleIndex);
 
-    // ------------------------------------------------------------
-    // 3. 找 class_list 的「真正開始位置」
-    // ------------------------------------------------------------
+    // ============================================================
+    // 3. 找 class_list
+    // ============================================================
 
     const classRegex =
       /<div[^>]*class=["'][^"']*\bclass_list\b[^"']*["'][^>]*>/gi;
@@ -120,9 +120,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // ------------------------------------------------------------
-    // 4. 課程名稱
-    // ------------------------------------------------------------
+    // ============================================================
+    // 4. 課程名稱清單
+    // ============================================================
 
     const knownClasses = [
       "BODYCOMBAT®",
@@ -131,11 +131,13 @@ export default async function handler(req, res) {
       "BODYJAM®",
       "BODYSTEP®",
       "BODYATTACK®",
+
       "GROUP POWER",
       "GROUP CENTERGY",
       "GROUP FIGHT",
       "GROUP BLAST",
       "GROUP GROOVE",
+
       "Step Move",
       "Stepforce",
       "Latin Jam",
@@ -148,6 +150,7 @@ export default async function handler(req, res) {
       "Zumba",
       "MV Dance",
       "Hip Hop",
+
       "Hatha Yoga",
       "Flow Yoga",
       "Gentle Yoga",
@@ -156,6 +159,7 @@ export default async function handler(req, res) {
       "Pilates",
       "Stretch Yoga",
       "Yo Yo Stretch",
+
       "BODYTURN",
       "Interval",
       "Fat Burning",
@@ -164,14 +168,17 @@ export default async function handler(req, res) {
       "Freestyle Step",
       "Dance Party",
       "Aerobics Intro",
+
       "Taichi Zen Martial Arts",
       "Restorative Yoga",
       "Power Yoga",
       "Yogalates",
       "Meridian Yoga",
       "Double Pop",
-      "Hip Hop",
-      "Total Body Sculpt",
+
+      "Core Stability Enhancement Training",
+      "Explosive Power Training",
+      "Sandbag Boxing Training",
     ];
 
     const classroomPatterns = [
@@ -183,9 +190,9 @@ export default async function handler(req, res) {
       "飛輪教室",
     ];
 
-    // ------------------------------------------------------------
+    // ============================================================
     // 5. 解析每一堂課
-    // ------------------------------------------------------------
+    // ============================================================
 
     const classes = [];
 
@@ -203,7 +210,10 @@ export default async function handler(req, res) {
 
       const text = stripHtml(block);
 
+      // ----------------------------------------------------------
       // 時間
+      // ----------------------------------------------------------
+
       const timeMatch = text.match(
         /\b([0-2]\d:[0-5]\d)\s*\|\s*([0-2]\d:[0-5]\d)\b/
       );
@@ -212,7 +222,13 @@ export default async function handler(req, res) {
         continue;
       }
 
+      const startTime = timeMatch[1];
+      const endTime = timeMatch[2];
+
+      // ----------------------------------------------------------
       // 課程名稱
+      // ----------------------------------------------------------
+
       let className = null;
 
       for (const name of knownClasses) {
@@ -222,7 +238,10 @@ export default async function handler(req, res) {
         }
       }
 
+      // ----------------------------------------------------------
       // 教室
+      // ----------------------------------------------------------
+
       let classroom = null;
 
       for (const room of classroomPatterns) {
@@ -246,115 +265,117 @@ export default async function handler(req, res) {
         instructor = stripHtml(teacherMatch[1]);
       }
 
-      // ----------------------------------------------------------
-      // 課程卡自己的 HTML
-      // ----------------------------------------------------------
+      // ==========================================================
+      // 找課程卡內部的 class
+      // ==========================================================
 
       const innerClassNames = [];
 
       const classAttrRegex =
         /class=["']([^"']+)["']/gi;
 
-      let ca;
+      let classAttrMatch;
 
-      while ((ca = classAttrRegex.exec(block)) !== null) {
-        innerClassNames.push(ca[1]);
+      while (
+        (classAttrMatch = classAttrRegex.exec(block)) !== null
+      ) {
+        innerClassNames.push(classAttrMatch[1]);
       }
 
-      // ----------------------------------------------------------
-      // 找所有 data-* 屬性
-      // ----------------------------------------------------------
+      // ==========================================================
+      // 找 data-* 屬性
+      // ==========================================================
 
       const dataAttributes = {};
 
       const dataRegex =
         /\s(data-[a-zA-Z0-9_-]+)=["']([^"']*)["']/gi;
 
-      let da;
+      let dataMatch;
 
-      while ((da = dataRegex.exec(block)) !== null) {
-        dataAttributes[da[1]] = decode(da[2]);
+      while ((dataMatch = dataRegex.exec(block)) !== null) {
+        dataAttributes[dataMatch[1]] = decode(dataMatch[2]);
       }
 
-      // ----------------------------------------------------------
-      // 找可能的日期
-      // ----------------------------------------------------------
+      // ==========================================================
+      // 找課程本身是否包含日期
+      // ==========================================================
 
       const embeddedDates = [];
 
       const embeddedDateRegex =
         /\b20\d{2}[\/-]\d{1,2}[\/-]\d{1,2}\b/g;
 
-      let ed;
+      let embeddedDateMatch;
 
-      while ((ed = embeddedDateRegex.exec(block)) !== null) {
-        const d = ed[0].replace(/\//g, "-");
+      while (
+        (embeddedDateMatch = embeddedDateRegex.exec(block)) !== null
+      ) {
+        const date = embeddedDateMatch[0].replace(/\//g, "-");
 
-        if (!embeddedDates.includes(d)) {
-          embeddedDates.push(d);
+        if (!embeddedDates.includes(date)) {
+          embeddedDates.push(date);
         }
       }
 
-      // ----------------------------------------------------------
-      // 找可能的星期 / 欄位
-      // ----------------------------------------------------------
+      // ==========================================================
+      // 找可能的日期／星期／欄位屬性
+      // ==========================================================
 
       const possibleColumnValues = [];
-
-      const allHtml = block;
 
       const columnRegex =
         /(?:column|col|day|weekday|week_day|weekDay)[-_a-zA-Z0-9]*=["']([^"']+)["']/gi;
 
-      let cm;
+      let columnMatch;
 
-      while ((cm = columnRegex.exec(allHtml)) !== null) {
-        possibleColumnValues.push(cm[1]);
+      while ((columnMatch = columnRegex.exec(block)) !== null) {
+        possibleColumnValues.push(columnMatch[1]);
       }
 
-      // ----------------------------------------------------------
+      // ==========================================================
       // 找所有 style
-      // ----------------------------------------------------------
+      // ==========================================================
 
       const styles = [];
 
       const styleRegex =
         /style=["']([^"']+)["']/gi;
 
-      let sm;
+      let styleMatch;
 
-      while ((sm = styleRegex.exec(block)) !== null) {
-        const style = decode(sm[1]);
+      while ((styleMatch = styleRegex.exec(block)) !== null) {
+        const style = decode(styleMatch[1]);
 
-        const left =
-          style.match(
-            /(?:^|;)\s*left\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
-          );
+        const left = style.match(
+          /(?:^|;)\s*left\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
+        );
 
-        const width =
-          style.match(
-            /(?:^|;)\s*width\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
-          );
+        const width = style.match(
+          /(?:^|;)\s*width\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
+        );
 
-        const transform =
-          style.match(
-            /translateX\s*\(\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
-          );
+        const transform = style.match(
+          /translateX\s*\(\s*(-?\d+(?:\.\d+)?)\s*(px|%)?/i
+        );
 
         styles.push({
           raw: style,
+
           left: left
             ? {
                 value: Number(left[1]),
                 unit: left[2] || null,
               }
             : null,
+
           width: width
             ? {
                 value: Number(width[1]),
                 unit: width[2] || null,
               }
             : null,
+
           translateX: transform
             ? {
                 value: Number(transform[1]),
@@ -364,9 +385,9 @@ export default async function handler(req, res) {
         });
       }
 
-      // ----------------------------------------------------------
-      // 找父層結構
-      // ----------------------------------------------------------
+      // ==========================================================
+      // 找課程前方的父層結構
+      // ==========================================================
 
       const before = scheduleHtml.slice(
         Math.max(0, start - 12000),
@@ -378,25 +399,25 @@ export default async function handler(req, res) {
       const parentRegex =
         /<(div|section|td|li|article)[^>]*class=["']([^"']+)["'][^>]*>/gi;
 
-      let pm;
+      let parentMatch;
 
-      while ((pm = parentRegex.exec(before)) !== null) {
+      while ((parentMatch = parentRegex.exec(before)) !== null) {
         parentTags.push({
-          tag: pm[1],
-          className: pm[2],
-          index: pm.index,
+          tag: parentMatch[1],
+          className: parentMatch[2],
+          index: parentMatch.index,
         });
       }
 
-      // ----------------------------------------------------------
-      // 儲存
-      // ----------------------------------------------------------
+      // ==========================================================
+      // 保存
+      // ==========================================================
 
       classes.push({
         index: i,
 
-        startTime: timeMatch[1],
-        endTime: timeMatch[2],
+        startTime,
+        endTime,
 
         className,
         classroom,
@@ -412,7 +433,6 @@ export default async function handler(req, res) {
 
         classNames: innerClassNames,
 
-        // 最接近課程前方的父層 class
         nearbyParents: parentTags.slice(-20),
 
         text: text.slice(0, 900),
@@ -421,35 +441,71 @@ export default async function handler(req, res) {
       });
     }
 
-    // ------------------------------------------------------------
-    // 6. 對每堂課找「最近日期」
-    // ------------------------------------------------------------
+    // ============================================================
+    // 6. 去除完全重複
+    // ============================================================
 
-    const dateAssociationPreview = classes.slice(0, 30).map((item) => {
-      const candidateDates = [];
+    const uniqueClasses = [];
 
-      // HTML 裡直接出現日期
-      for (const d of item.embeddedDates) {
-        candidateDates.push({
-          date: d,
-          method: "embedded-date",
-        });
+    const seen = new Set();
+
+    for (const item of classes) {
+      const key = [
+        item.startTime,
+        item.endTime,
+        item.className,
+        item.classroom,
+        item.instructor,
+        item.text,
+      ].join("|");
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueClasses.push(item);
       }
+    }
 
-      return {
-        index: item.index,
-        time: `${item.startTime}-${item.endTime}`,
-        className: item.className,
-        instructor: item.instructor,
-        candidateDates,
-        possibleColumnValues: item.possibleColumnValues,
-        styles: item.styles,
-      };
-    });
+    // ============================================================
+    // 7. 日期配對預覽
+    // ============================================================
 
-    // ------------------------------------------------------------
-    // 7. 回傳
-    // ------------------------------------------------------------
+    const dateAssociationPreview =
+      uniqueClasses.slice(0, 30).map((item) => {
+        const candidateDates = [];
+
+        for (const date of item.embeddedDates) {
+          candidateDates.push({
+            date,
+            method: "embedded-date",
+          });
+        }
+
+        return {
+          index: item.index,
+
+          time: `${item.startTime}-${item.endTime}`,
+
+          className: item.className,
+
+          instructor: item.instructor,
+
+          classroom: item.classroom,
+
+          candidateDates,
+
+          possibleColumnValues:
+            item.possibleColumnValues,
+
+          styles: item.styles,
+
+          nearbyParents:
+            item.nearbyParents,
+        };
+      });
+
+    // ============================================================
+    // 8. 回傳結果
+    // ============================================================
 
     return res.status(200).json({
       success: true,
@@ -457,6 +513,7 @@ export default async function handler(req, res) {
       version: "worldgym-date-mapping-1",
 
       source: "World Gym Taiwan",
+
       branch: "台北統領",
 
       fetchedAt: new Date().toISOString(),
@@ -464,19 +521,23 @@ export default async function handler(req, res) {
       htmlLength: html.length,
 
       dateCount: dates.length,
+
       dates,
 
-      classCount: classes.length,
+      classCount: uniqueClasses.length,
 
       dateAssociationPreview,
 
-      classes: classes.slice(0, 20),
+      classes: uniqueClasses.slice(0, 20),
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
+
       version: "worldgym-date-mapping-1",
+
       error: error.message,
+
       stack: error.stack,
     });
   }
