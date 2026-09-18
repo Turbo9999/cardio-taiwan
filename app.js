@@ -378,6 +378,16 @@ async function restoreSession(){
   }
 }
 
+function consumeEmailConfirmation(){
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const accessToken = params.get("access_token");
+  const refreshToken = params.get("refresh_token");
+  if(!accessToken) return;
+  authSession = { access_token: accessToken, refresh_token: refreshToken || "" };
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authSession));
+  window.history.replaceState({}, document.title, window.location.pathname);
+}
+
 async function submitAuth(event, mode){
   event.preventDefault();
   const form = event.currentTarget;
@@ -388,7 +398,9 @@ async function submitAuth(event, mode){
   button.disabled = true;
   try{
     const path = mode === "signup" ? "signup" : "token?grant_type=password";
-    const body = mode === "signup" ? { email, password, data: { display_name: displayName } } : { email, password };
+    const body = mode === "signup"
+      ? { email, password, data: { display_name: displayName }, options: { emailRedirectTo: window.location.origin } }
+      : { email, password };
     const result = await authRequest(path, { method: "POST", body: JSON.stringify(body) });
     if(!result.access_token){
       toast("請至 Email 信箱點擊驗證連結後再登入");
@@ -406,6 +418,25 @@ async function submitAuth(event, mode){
     }
     toast(mode === "signup" ? "帳號建立成功！" : "登入成功！");
     render("profile");
+  }catch(error){
+    toast(`⚠️ ${error.message}`);
+  }finally{
+    button.disabled = false;
+  }
+}
+
+async function resendConfirmation(event){
+  event.preventDefault();
+  const form = event.currentTarget;
+  const email = form.email.value.trim();
+  const button = form.querySelector("button");
+  button.disabled = true;
+  try{
+    await authRequest("resend", {
+      method: "POST",
+      body: JSON.stringify({ type: "signup", email, options: { emailRedirectTo: window.location.origin } })
+    });
+    toast("驗證信已重新寄出，請查看收件匣");
   }catch(error){
     toast(`⚠️ ${error.message}`);
   }finally{
@@ -2217,6 +2248,11 @@ function profile(){
           <label>密碼（至少 6 碼）<input name="password" type="password" autocomplete="new-password" minlength="6" required></label>
           <button class="primary" type="submit">建立帳號</button>
         </form>
+        <form class="quest auth-form" onsubmit="resendConfirmation(event)">
+          <h3>沒有收到或連結過期？</h3>
+          <label>註冊 Email<input name="email" type="email" autocomplete="email" required></label>
+          <button class="ghost" type="submit">重新寄送驗證信</button>
+        </form>
       </section>`;
     return;
   }
@@ -2348,6 +2384,9 @@ async function init(){
   try{
 
     injectScheduleStyles();
+
+    // Supabase 驗證信會把工作階段放在網址雜湊中；取用後立刻清除網址。
+    consumeEmailConfirmation();
 
     // 還原既有登入狀態；失效的工作階段會安全地回到訪客模式。
     await restoreSession();
