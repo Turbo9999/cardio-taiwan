@@ -1,25 +1,26 @@
 const WORLD_GYM_URL =
   "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
 
-function getMatches(html, regex, limit = 100) {
+function getSnippet(html, index, before = 2500, after = 8000) {
+  const start = Math.max(0, index - before);
+  const end = Math.min(html.length, index + after);
+  return html.slice(start, end);
+}
+
+function collectMatches(html, regex, limit = 100) {
   const results = [];
   let match;
 
-  while ((match = regex.exec(html)) !== null && results.length < limit) {
+  while ((match = regex.exec(html)) !== null) {
     results.push({
       index: match.index,
       match: match[0]
     });
+
+    if (results.length >= limit) break;
   }
 
   return results;
-}
-
-function getSnippet(html, index, before = 3000, after = 12000) {
-  const start = Math.max(0, index - before);
-  const end = Math.min(html.length, index + after);
-
-  return html.slice(start, end);
 }
 
 export default async function handler(req, res) {
@@ -41,56 +42,90 @@ export default async function handler(req, res) {
 
     const html = await response.text();
 
-    // 找 daybox
-    const dayboxMatches = getMatches(
+    // 找課表區域
+    const scheduleIndex = html.indexOf('id="schedule_area"');
+
+    // 找日期切換相關內容
+    const dayboxIndex = html.indexOf('class="daybox"');
+
+    // 找可能控制日期切換的 JavaScript / Ajax 關鍵字
+    const keywordRegex =
+      /(schedule_area|daybox|changeSchedul|dayclick|dayselect|ajax|schedule|aerobic_class_schedule)/gi;
+
+    const keywordMatches = collectMatches(
       html,
-      /class=["'][^"']*daybox[^"']*["']/gi,
+      keywordRegex,
+      80
+    );
+
+    // 找真正的課程時間 HTML
+    const timeRegex =
+      /<div[^>]*class=["'][^"']*newclass_time[^"']*["'][^>]*>[\s\S]{0,500}?<\/div>/gi;
+
+    const timeMatches = collectMatches(
+      html,
+      timeRegex,
       20
     );
 
-    // 找 newclass_time
-    const newclassTimeMatches = getMatches(
+    // 找課程名稱相關區塊
+    const typeRegex =
+      /<div[^>]*class=["'][^"']*newclass_type[^"']*["'][^>]*>[\s\S]{0,1000}?<\/div>/gi;
+
+    const typeMatches = collectMatches(
       html,
-      /class=["'][^"']*newclass_time[^"']*["']/gi,
+      typeRegex,
       20
     );
 
-    // 找 newclass_type
-    const newclassTypeMatches = getMatches(
+    // 找可能的 AJAX URL
+    const urlRegex =
+      /["']([^"']*(?:schedule|aerobic|class)[^"']*)["']/gi;
+
+    const urlMatches = collectMatches(
       html,
-      /class=["'][^"']*newclass_type[^"']*["']/gi,
-      20
+      urlRegex,
+      100
     );
 
-    // 找 classroom
-    const classroomMatches = getMatches(
-      html,
-      /class=["'][^"']*classroom[^"']*["']/gi,
-      20
-    );
+    // 找日期切換按鈕附近的完整 HTML
+    const daySamples = [];
 
-    // 找日期文字
-    const dateMatches = getMatches(
-      html,
-      /2026[\/.-]\d{1,2}[\/.-]\d{1,2}|Sep\.\s*\d{1,2}/gi,
-      50
-    );
+    const dayRegex =
+      /<[^>]*class=["'][^"']*daybox[^"']*["'][^>]*>/gi;
 
-    // 取前幾個 daybox 的完整附近內容
-    const dayboxSamples = dayboxMatches.slice(0, 7).map((item, i) => ({
-      number: i + 1,
-      index: item.index,
-      match: item.match,
-      html: getSnippet(html, item.index, 1000, 16000)
-    }));
+    let dayMatch;
+    let dayCount = 0;
 
-    // 取第一批 newclass_time 周邊 HTML
-    const timeSamples = newclassTimeMatches.slice(0, 10).map((item, i) => ({
-      number: i + 1,
-      index: item.index,
-      match: item.match,
-      html: getSnippet(html, item.index, 1500, 5000)
-    }));
+    while (
+      (dayMatch = dayRegex.exec(html)) !== null &&
+      dayCount < 5
+    ) {
+      daySamples.push({
+        number: dayCount + 1,
+        index: dayMatch.index,
+        html: getSnippet(
+          html,
+          dayMatch.index,
+          1000,
+          5000
+        )
+      });
+
+      dayCount++;
+    }
+
+    // 課表區域附近 HTML
+    const scheduleSample =
+      scheduleIndex >= 0
+        ? html.slice(
+            scheduleIndex,
+            Math.min(
+              html.length,
+              scheduleIndex + 30000
+            )
+          )
+        : null;
 
     return res.status(200).json({
       success: true,
@@ -99,22 +134,41 @@ export default async function handler(req, res) {
       status: response.status,
       htmlLength: html.length,
 
-      dateMatches: dateMatches.map(x => x.match),
+      scheduleIndex,
+      dayboxIndex,
 
-      dayboxCount: dayboxMatches.length,
-      dayboxMatches: dayboxMatches.map(x => x.match),
-      dayboxSamples,
+      timeCount: timeMatches.length,
+      timeMatches: timeMatches.map(
+        item => item.match
+      ),
 
-      newclassTimeCount: newclassTimeMatches.length,
-      newclassTimeMatches: newclassTimeMatches.map(x => x.match),
+      typeCount: typeMatches.length,
+      typeMatches: typeMatches.map(
+        item => item.match
+      ),
 
-      newclassTypeCount: newclassTypeMatches.length,
-      newclassTypeMatches: newclassTypeMatches.map(x => x.match),
+      daySamples,
 
-      classroomCount: classroomMatches.length,
-      classroomMatches: classroomMatches.map(x => x.match),
+      interestingUrls: [
+        ...new Set(
+          urlMatches.map(item => item.match)
+        )
+      ].slice(0, 100),
 
-      timeSamples
+      keywordMatches: keywordMatches.map(
+        item => ({
+          index: item.index,
+          match: item.match,
+          snippet: getSnippet(
+            html,
+            item.index,
+            500,
+            1500
+          )
+        })
+      ),
+
+      scheduleSample
     });
 
   } catch (error) {
