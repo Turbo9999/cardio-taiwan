@@ -40,6 +40,7 @@ export default async function handler(req, res) {
         name: item.branch_show_name,
         slug: item.branch_name_e,
         branchNo: item.branch_no,
+        series: item.branch_series_name,
       }))
       .filter((item) => {
         if (!item.name || !/^[a-z0-9-]+$/i.test(item.slug || "")) return false;
