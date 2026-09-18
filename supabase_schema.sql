@@ -61,3 +61,38 @@ create table if not exists user_badges (
   unlocked_at timestamptz default now(),
   primary key(user_id,badge_id)
 );
+
+-- Account support: run this entire file in the Supabase SQL Editor once.
+-- auth.users is managed by Supabase; this trigger creates a matching profile.
+alter table profiles enable row level security;
+alter table workouts enable row level security;
+alter table user_badges enable row level security;
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profiles (id, display_name)
+  values (new.id, coalesce(new.raw_user_meta_data ->> 'display_name', split_part(new.email, '@', 1)));
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+drop policy if exists "Users read own profile" on profiles;
+drop policy if exists "Users update own profile" on profiles;
+drop policy if exists "Users read own workouts" on workouts;
+drop policy if exists "Users add own workouts" on workouts;
+drop policy if exists "Users read own badges" on user_badges;
+
+create policy "Users read own profile" on profiles for select using (auth.uid() = id);
+create policy "Users update own profile" on profiles for update using (auth.uid() = id);
+create policy "Users read own workouts" on workouts for select using (auth.uid() = user_id);
+create policy "Users add own workouts" on workouts for insert with check (auth.uid() = user_id);
+create policy "Users read own badges" on user_badges for select using (auth.uid() = user_id);
