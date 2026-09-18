@@ -1,30 +1,31 @@
 const SUPABASE_URL = "https://wylfqwzictkepnefwksx.supabase.co";
 
-// ⚠️ 保留你目前 GitHub 裡原本的 Supabase Publishable Key
-const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_5ITurxoUWu2ihIkDBrzWaQ_8uFP1LxZ";
+const SUPABASE_PUBLISHABLE_KEY =
+  "sb_publishable_5ITurxoUWu2ihIkDBrzWaQ_8uFP1LxZ";
 
-// ================================
+
+// ========================================
 // CARDIO TAIWAN
-// 動態分店 + 日期 + 課表版本
-// ================================
+// ========================================
 
-// 預設分店
-let selectedBranchId = "1d0c08d3-b6b9-473a-b76a-c6330a291888";
-let selectedBranchName = "台北統領";
-
-// 預設日期
-// 目前資料庫有 2026-09-17 的測試課表
-let selectedDate = "2026-09-17";
-
-// 所有分店
 let branches = [];
-
-// 課表
 let schedule = [];
 
-// ================================
-// BADGES
-// ================================
+
+// ========================================
+// 使用者目前選擇
+// 不預設任何分店
+// ========================================
+
+let selectedBranchId =
+  localStorage.getItem("cq_branch_id") || "";
+
+let selectedBranchName =
+  localStorage.getItem("cq_branch_name") || "";
+
+let selectedDate =
+  localStorage.getItem("cq_date") || "";
+
 
 const badges = [
   ["🥊","Combat Rookie","完成 1 堂 BODYCOMBAT®",true],
@@ -35,96 +36,322 @@ const badges = [
   ["🌈","Class Collector","完成 5 種不同課程",false]
 ];
 
-// ================================
-// LOCAL STORAGE
-// ================================
 
-let xp = Number(localStorage.getItem("cq_xp") || 0);
-let completed = Number(localStorage.getItem("cq_completed") || 0);
-let streak = Number(localStorage.getItem("cq_streak") || 0);
+let xp =
+  Number(localStorage.getItem("cq_xp") || 0);
 
-// ================================
-// DOM
-// ================================
+let completed =
+  Number(localStorage.getItem("cq_completed") || 0);
 
-const content = document.querySelector("#content");
-const title = document.querySelector("#pageTitle");
+let streak =
+  Number(localStorage.getItem("cq_streak") || 0);
 
-// ================================
-// TOAST
-// ================================
+
+const content =
+  document.querySelector("#content");
+
+const title =
+  document.querySelector("#pageTitle");
+
+
+// ========================================
+// UI 工具
+// ========================================
 
 function toast(msg){
 
-  const el = document.querySelector("#toast");
+  const el =
+    document.querySelector("#toast");
 
   if(!el) return;
 
   el.textContent = msg;
+
   el.classList.add("show");
 
   setTimeout(() => {
+
     el.classList.remove("show");
+
   }, 1800);
+
 }
 
-// ================================
-// LOAD BRANCHES
-// 從 Supabase 取得所有分店
-// ================================
 
-async function loadBranches(){
+function formatDate(date){
 
-  const params = new URLSearchParams({
+  if(!date) return "";
 
-    select:
-      "id,name,city,official_url,latitude,longitude,checkin_radius",
+  const parts =
+    date.split("-");
 
-    order:
-      "city.asc,name.asc"
+  if(parts.length !== 3){
+    return date;
+  }
 
-  });
+  return `${parts[0]}年${Number(parts[1])}月${Number(parts[2])}日`;
 
-  const response = await fetch(
+}
 
-    `${SUPABASE_URL}/rest/v1/branches?${params.toString()}`,
 
-    {
-      method: "GET",
+function formatDateSlash(date){
 
-      headers: {
-        "apikey": SUPABASE_PUBLISHABLE_KEY,
-        "Authorization":
-          `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
-      }
+  if(!date) return "";
+
+  return date.replaceAll("-", "/");
+
+}
+
+
+// ========================================
+// 課表頁 CSS
+// ========================================
+
+function injectScheduleStyles(){
+
+  if(
+    document.querySelector(
+      "#schedule-page-styles"
+    )
+  ){
+    return;
+  }
+
+  const style =
+    document.createElement("style");
+
+  style.id =
+    "schedule-page-styles";
+
+  style.textContent = `
+
+    .schedule-controls{
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      margin:24px 0 24px;
     }
 
-  );
+    .schedule-control{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .schedule-control-label{
+      width:72px;
+      min-width:72px;
+      font-size:17px;
+      font-weight:700;
+      color:#f3f4f6;
+      line-height:1;
+    }
+
+    .schedule-control-input{
+      flex:1;
+      min-width:0;
+      height:52px;
+      box-sizing:border-box;
+      border:1px solid #293242;
+      border-radius:16px;
+      background:#121720;
+      color:#f5f7fb;
+      padding:0 14px;
+      font-size:16px;
+      outline:none;
+    }
+
+    .schedule-control-input:focus{
+      border-color:#e94f9b;
+      box-shadow:
+        0 0 0 2px
+        rgba(233,79,155,.12);
+    }
+
+    .schedule-control-input:disabled{
+      opacity:.5;
+      cursor:not-allowed;
+    }
+
+    .schedule-date-input{
+      color-scheme:dark;
+    }
+
+    .schedule-empty{
+      padding:32px 18px;
+      text-align:center;
+      border:1px dashed #303847;
+      border-radius:18px;
+      color:#9ca3af;
+      background:#11161e;
+    }
+
+    .schedule-loading{
+      padding:30px 18px;
+      text-align:center;
+      color:#a8afbd;
+    }
+
+    .schedule-heading{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:14px;
+    }
+
+    .schedule-heading h3{
+      margin:0;
+    }
+
+    .schedule-heading-date{
+      color:#929aaa;
+      font-size:14px;
+      white-space:nowrap;
+    }
+
+    .schedule-notice{
+      padding:18px;
+      border-radius:16px;
+      background:#11161e;
+      border:1px solid #293242;
+      color:#aeb5c2;
+      text-align:center;
+    }
+
+    @media(max-width:430px){
+
+      .schedule-control-label{
+        width:68px;
+        min-width:68px;
+        font-size:16px;
+      }
+
+      .schedule-control-input{
+        height:50px;
+        font-size:15px;
+      }
+
+    }
+
+  `;
+
+  document.head.appendChild(style);
+
+}
+
+
+// ========================================
+// Supabase API
+// ========================================
+
+async function supabaseFetch(
+  table,
+  params
+){
+
+  const url =
+    `${SUPABASE_URL}/rest/v1/${table}?${params.toString()}`;
+
+  const response =
+    await fetch(
+      url,
+      {
+        method:"GET",
+
+        headers:{
+          "apikey":
+            SUPABASE_PUBLISHABLE_KEY,
+
+          "Authorization":
+            `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+
+          "Accept":
+            "application/json"
+        }
+      }
+    );
+
 
   if(!response.ok){
 
-    const errorText = await response.text();
+    const errorText =
+      await response.text();
 
     throw new Error(errorText);
 
   }
 
-  branches = await response.json();
 
-  // 如果預設分店不存在
-  // 自動選第一間分店
+  return response.json();
 
-  if(branches.length){
+}
 
-    const exists =
-      branches.some(
-        branch => branch.id === selectedBranchId
+
+// ========================================
+// 載入分店
+// ========================================
+
+async function loadBranches(){
+
+  const params =
+    new URLSearchParams({
+
+      select:
+        "id,name,city,official_url",
+
+      order:
+        "city.asc,name.asc"
+
+    });
+
+
+  branches =
+    await supabaseFetch(
+      "branches",
+      params
+    );
+
+
+  if(!branches.length){
+
+    throw new Error(
+      "Supabase branches 沒有資料"
+    );
+
+  }
+
+
+  // 如果之前有選過分店
+  // 而且這間分店仍然存在
+  // 就保留使用者的選擇
+
+  if(selectedBranchId){
+
+    const savedBranch =
+      branches.find(
+        branch =>
+          branch.id === selectedBranchId
       );
 
-    if(!exists){
 
-      selectedBranchId = branches[0].id;
-      selectedBranchName = branches[0].name;
+    if(savedBranch){
+
+      selectedBranchName =
+        savedBranch.name;
+
+    }else{
+
+      selectedBranchId = "";
+      selectedBranchName = "";
+
+      localStorage.removeItem(
+        "cq_branch_id"
+      );
+
+      localStorage.removeItem(
+        "cq_branch_name"
+      );
 
     }
 
@@ -132,117 +359,232 @@ async function loadBranches(){
 
 }
 
-// ================================
-// LOAD SCHEDULE
-// 根據目前選擇的分店＋日期抓課表
-// ================================
+
+// ========================================
+// 載入指定分店＋指定日期
+// ========================================
 
 async function loadSchedule(){
 
+  schedule = [];
+
+
+  // 沒選分店
   if(!selectedBranchId){
 
-    schedule = [];
     return;
 
   }
 
-  const params = new URLSearchParams({
 
-    select:
-      "date,start_time,end_time,room,instructor,classes(name,category)",
+  // 沒選日期
+  if(!selectedDate){
 
-    branch_id:
-      `eq.${selectedBranchId}`,
-
-    date:
-      `eq.${selectedDate}`,
-
-    order:
-      "start_time.asc"
-
-  });
-
-  const response = await fetch(
-
-    `${SUPABASE_URL}/rest/v1/class_schedules?${params.toString()}`,
-
-    {
-      method: "GET",
-
-      headers: {
-        "apikey": SUPABASE_PUBLISHABLE_KEY,
-        "Authorization":
-          `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
-      }
-    }
-
-  );
-
-  if(!response.ok){
-
-    const errorText = await response.text();
-
-    throw new Error(errorText);
+    return;
 
   }
 
-  const rows = await response.json();
 
-  schedule = rows.map(row => ({
+  const params =
+    new URLSearchParams({
 
-    time:
-      row.start_time
-      ? row.start_time.slice(0,5)
-      : "",
+      select:
+        "date,start_time,end_time,room,instructor,classes(name,category)",
 
-    end:
-      row.end_time
-      ? row.end_time.slice(0,5)
-      : "",
+      branch_id:
+        `eq.${selectedBranchId}`,
 
-    name:
-      row.classes?.name ||
-      "未命名課程",
+      date:
+        `eq.${selectedDate}`,
 
-    room:
-      row.room ||
-      "",
+      order:
+        "start_time.asc"
 
-    instructor:
-      row.instructor ||
-      "",
+    });
 
-    type:
-      row.classes?.category ||
-      ""
 
-  }));
+  const rows =
+    await supabaseFetch(
+      "class_schedules",
+      params
+    );
+
+
+  schedule =
+    rows.map(
+      row => ({
+
+        time:
+          row.start_time
+            ? row.start_time.slice(0,5)
+            : "",
+
+        end:
+          row.end_time
+            ? row.end_time.slice(0,5)
+            : "",
+
+        name:
+          row.classes?.name ||
+          "未命名課程",
+
+        room:
+          row.room || "",
+
+        instructor:
+          row.instructor || "",
+
+        type:
+          row.classes?.category || ""
+
+      })
+    );
 
 }
 
-// ================================
-// CHANGE BRANCH
-// ================================
 
-async function changeBranch(branchId){
+// ========================================
+// 選擇分店
+// ========================================
+
+async function changeBranch(
+  branchId
+){
 
   const branch =
     branches.find(
-      branch => branch.id === branchId
+      item =>
+        item.id === branchId
     );
 
-  if(!branch) return;
 
-  selectedBranchId = branch.id;
-  selectedBranchName = branch.name;
+  if(!branch){
+
+    return;
+
+  }
+
+
+  selectedBranchId =
+    branch.id;
+
+  selectedBranchName =
+    branch.name;
+
+
+  localStorage.setItem(
+    "cq_branch_id",
+    selectedBranchId
+  );
+
+  localStorage.setItem(
+    "cq_branch_name",
+    selectedBranchName
+  );
+
+
+  // 選擇分店後
+  // 如果還沒選日期，不抓課表
+
+  if(selectedDate){
+
+    await refreshSchedule();
+
+  }else{
+
+    render("classes");
+
+  }
+
+}
+
+
+// ========================================
+// 選擇日期
+// ========================================
+
+async function changeDate(
+  date
+){
+
+  if(!date){
+
+    selectedDate = "";
+
+    localStorage.removeItem(
+      "cq_date"
+    );
+
+    schedule = [];
+
+    render("classes");
+
+    return;
+
+  }
+
+
+  selectedDate =
+    date;
+
+
+  localStorage.setItem(
+    "cq_date",
+    selectedDate
+  );
+
+
+  // 沒選分店
+  // 不查詢
+
+  if(!selectedBranchId){
+
+    render("classes");
+
+    return;
+
+  }
+
+
+  await refreshSchedule();
+
+}
+
+
+// ========================================
+// 重新抓課表
+// ========================================
+
+async function refreshSchedule(){
+
+  const list =
+    document.querySelector(
+      "#classList"
+    );
+
+
+  if(list){
+
+    list.innerHTML = `
+
+      <div class="schedule-loading">
+
+        正在載入
+        ${formatDate(selectedDate)}
+        的課表…
+
+      </div>
+
+    `;
+
+  }
+
 
   try{
 
     await loadSchedule();
 
     render("classes");
-
-    toast(`📍 已切換到 ${selectedBranchName}`);
 
   }catch(error){
 
@@ -255,52 +597,18 @@ async function changeBranch(branchId){
 
     render("classes");
 
-    toast("⚠️ 課表載入失敗");
-
-  }
-
-}
-
-// ================================
-// CHANGE DATE
-// ================================
-
-async function changeDate(date){
-
-  if(!date) return;
-
-  selectedDate = date;
-
-  try{
-
-    await loadSchedule();
-
-    render("classes");
-
-    toast(`📅 已切換到 ${selectedDate}`);
-
-  }catch(error){
-
-    console.error(
-      "Schedule error:",
-      error
+    toast(
+      "⚠️ 課表載入失敗"
     );
 
-    schedule = [];
-
-    render("classes");
-
-    toast("⚠️ 課表載入失敗");
-
   }
 
 }
 
-// ================================
-// COMPLETE WORKOUT
-// 暫時仍使用 localStorage
-// GPS 驗證之後再接
-// ================================
+
+// ========================================
+// 完成課程
+// ========================================
 
 function completeWorkout(name){
 
@@ -309,7 +617,11 @@ function completeWorkout(name){
   completed += 1;
 
   streak =
-    Math.max(streak, 1);
+    Math.max(
+      streak,
+      1
+    );
+
 
   localStorage.setItem(
     "cq_xp",
@@ -326,17 +638,20 @@ function completeWorkout(name){
     streak
   );
 
+
   toast(
     `🎉 ${name} 完成！ +300 XP`
   );
+
 
   render("home");
 
 }
 
-// ================================
-// NAVIGATION
-// ================================
+
+// ========================================
+// 導覽
+// ========================================
 
 function nav(tab){
 
@@ -348,6 +663,7 @@ function nav(tab){
   render(tab);
 
 }
+
 
 document
   .querySelectorAll("[data-tab]")
@@ -366,59 +682,72 @@ document
 
   });
 
-// ================================
-// RENDER
-// ================================
 
-function render(tab = "home"){
+// ========================================
+// Render
+// ========================================
+
+function render(
+  tab = "home"
+){
 
   document
     .querySelectorAll("[data-tab]")
     .forEach(button => {
 
       button.classList.toggle(
-
         "active",
-
         button.dataset.tab === tab
-
       );
 
     });
 
+
   const titles = {
 
-    home: "首頁",
-    classes: "課表",
-    badges: "勳章",
-    social: "社群",
-    profile: "我的"
+    home:"首頁",
+
+    classes:"課表",
+
+    badges:"勳章",
+
+    social:"社群",
+
+    profile:"我的"
 
   };
+
 
   title.textContent =
     titles[tab] || "首頁";
 
-  if(tab === "home")
+
+  if(tab === "home"){
     home();
+  }
 
-  if(tab === "classes")
+  if(tab === "classes"){
     classes();
+  }
 
-  if(tab === "badges")
+  if(tab === "badges"){
     badgePage();
+  }
 
-  if(tab === "social")
+  if(tab === "social"){
     social();
+  }
 
-  if(tab === "profile")
+  if(tab === "profile"){
     profile();
+  }
 
 }
 
-// ================================
-// HOME
-// ================================
+
+// ========================================
+// 首頁
+// ========================================
 
 function home(){
 
@@ -441,39 +770,24 @@ function home(){
       <div class="stats">
 
         <div class="stat">
-
           <b>
             ${xp.toLocaleString()}
           </b>
-
-          <small>
-            XP
-          </small>
-
+          <small>XP</small>
         </div>
 
         <div class="stat">
-
           <b>
             Lv.${Math.floor(xp / 1000) + 1}
           </b>
-
-          <small>
-            等級
-          </small>
-
+          <small>等級</small>
         </div>
 
         <div class="stat">
-
           <b>
             🔥 ${streak}
           </b>
-
-          <small>
-            Streak
-          </small>
-
+          <small>Streak</small>
         </div>
 
       </div>
@@ -506,9 +820,7 @@ function home(){
               DAILY QUEST
             </span>
 
-            <h3
-              style="margin:8px 0 3px"
-            >
+            <h3 style="margin:8px 0 3px">
               完成一堂有氧課
             </h3>
 
@@ -528,7 +840,9 @@ function home(){
         <div class="progress">
 
           <i
-            style="width:${completed % 2 ? 100 : 35}%"
+            style="
+              width:${completed % 2 ? 100 : 35}%
+            "
           ></i>
 
         </div>
@@ -538,7 +852,7 @@ function home(){
           class="primary"
           onclick="nav('classes')"
         >
-          找課程
+          找今天的課
         </button>
 
       </div>
@@ -551,7 +865,11 @@ function home(){
       <div class="section-title">
 
         <h3>
-          📍 ${selectedBranchName}
+          📅
+          ${
+            selectedBranchName ||
+            "選擇你的健身分店"
+          }
         </h3>
 
         <span>
@@ -564,16 +882,28 @@ function home(){
       ${
         schedule.length
 
-        ? schedule
-            .slice(0,3)
-            .map(card)
-            .join("")
+          ? schedule
+              .slice(0,3)
+              .map(card)
+              .join("")
 
-        : `
-          <div class="muted">
-            目前沒有課程資料。
-          </div>
-        `
+          : `
+
+            <div class="muted">
+
+              ${
+                selectedBranchName &&
+                selectedDate
+
+                  ? `${formatDate(selectedDate)} 暫無課程資料`
+
+                  : "前往課表選擇分店與日期"
+
+              }
+
+            </div>
+
+          `
       }
 
     </section>
@@ -582,9 +912,10 @@ function home(){
 
 }
 
-// ================================
-// CLASS CARD
-// ================================
+
+// ========================================
+// 課程卡片
+// ========================================
 
 function card(c){
 
@@ -607,7 +938,8 @@ function card(c){
           <div class="class-meta">
 
             ${c.room}
-            · 教練 ${c.instructor}
+            · 教練
+            ${c.instructor}
 
             <br>
 
@@ -633,206 +965,325 @@ function card(c){
 
 }
 
-// ================================
-// CLASSES
-// ================================
+
+// ========================================
+// 課表
+// ========================================
 
 function classes(){
 
+  injectScheduleStyles();
+
+
+  const branchOptions =
+    branches
+      .map(
+        branch => `
+
+          <option
+            value="${branch.id}"
+            ${
+              branch.id === selectedBranchId
+                ? "selected"
+                : ""
+            }
+          >
+            ${branch.city || ""}
+            ${
+              branch.city
+                ? "・"
+                : ""
+            }
+            ${branch.name}
+          </option>
+
+        `
+      )
+      .join("");
+
+
+  const officialUrl =
+    branches.find(
+      b =>
+        b.id === selectedBranchId
+    )?.official_url || "";
+
+
   content.innerHTML = `
 
-    <section class="section">
-
-      <div class="section-title">
-
-        <h3>
-          📍 選擇分店
-        </h3>
-
-      </div>
+    <section class="schedule-controls">
 
 
-      <select
-        id="branchSelect"
-        class="search"
-        style="margin-bottom:12px"
-      >
+      <div class="schedule-control">
 
-        ${
-          branches.length
-
-          ? branches
-              .map(branch => `
-
-                <option
-                  value="${branch.id}"
-                  ${
-                    branch.id === selectedBranchId
-                    ? "selected"
-                    : ""
-                  }
-                >
-
-                  ${
-                    branch.city
-                    ? `${branch.city} · `
-                    : ""
-                  }
-
-                  ${branch.name}
-
-                </option>
-
-              `)
-              .join("")
-
-          : `
-              <option>
-                尚無分店資料
-              </option>
-            `
-        }
-
-      </select>
-
-
-      <div class="section-title">
-
-        <h3>
-          📅 選擇日期
-        </h3>
-
-      </div>
-
-
-      <input
-        class="search"
-        id="dateSelect"
-        type="date"
-        value="${selectedDate}"
-        style="margin-bottom:18px"
-      >
-
-
-      <input
-        class="search"
-        id="q"
-        placeholder="搜尋課程，例如 BODYCOMBAT、瑜伽、飛輪"
-      >
-
-
-      <div class="filterbar">
-
-        <button
-          class="ghost"
-          onclick="filterClasses('all')"
-        >
-          全部
-        </button>
-
-        <button
-          class="ghost"
-          onclick="filterClasses('Les Mills')"
-        >
-          Les Mills
-        </button>
-
-        <button
-          class="ghost"
-          onclick="filterClasses('MOSSA')"
-        >
-          MOSSA
-        </button>
-
-        <button
-          class="ghost"
-          onclick="filterClasses('飛輪心率')"
-        >
-          飛輪
-        </button>
-
-        <button
-          class="ghost"
-          onclick="filterClasses('心肺肌力訓練')"
-        >
-          有氧
-        </button>
-
-      </div>
-
-
-      <section class="section">
-
-        <div class="section-title">
-
-          <h3>
-            📍 ${selectedBranchName}
-          </h3>
-
-          <span>
-            ${selectedDate}
-          </span>
-
+        <div class="schedule-control-label">
+          📍 分店
         </div>
 
 
-        <div id="classList">
+        <select
+          id="branchSelector"
+          class="schedule-control-input"
+        >
 
+          <option
+            value=""
+            ${
+              !selectedBranchId
+                ? "selected"
+                : ""
+            }
+          >
+            請選擇分店
+          </option>
+
+          ${branchOptions}
+
+        </select>
+
+      </div>
+
+
+      <div class="schedule-control">
+
+        <div class="schedule-control-label">
+          📅 日期
+        </div>
+
+
+        <input
+          id="dateSelector"
+          class="schedule-control-input schedule-date-input"
+          type="date"
+          value="${selectedDate}"
           ${
-            schedule.length
-
-            ? schedule
-                .map(card)
-                .join("")
-
-            : `
-              <div class="muted">
-                這一天目前沒有課程資料。
-              </div>
-            `
+            !selectedBranchId
+              ? "disabled"
+              : ""
           }
+        >
 
-        </div>
-
-
-        <div class="source">
-
-          資料來源：World Gym Taiwan 公開有氧課表。
-          <br>
-
-          本頁資料由 CARDIO TAIWAN Supabase 資料庫提供。
-
-          <br><br>
-
-          ${
-            getCurrentBranchUrl()
-          }
-
-        </div>
-
-      </section>
+      </div>
 
     </section>
+
+
+    ${
+      !selectedBranchId
+
+        ? `
+
+          <div class="schedule-notice">
+
+            📍 請先選擇分店
+
+            <br><br>
+
+            選擇分店後，
+            就可以選擇日期查看課表。
+
+          </div>
+
+        `
+
+        : !selectedDate
+
+          ? `
+
+            <div class="schedule-notice">
+
+              📅 請選擇日期
+
+            </div>
+
+          `
+
+          : `
+
+            <input
+              class="search"
+              id="q"
+              placeholder="搜尋課程，例如 BODYCOMBAT、瑜伽、飛輪"
+            >
+
+
+            <div class="filterbar">
+
+              <button
+                class="ghost"
+                data-filter="all"
+              >
+                全部
+              </button>
+
+              <button
+                class="ghost"
+                data-filter="Les Mills"
+              >
+                Les Mills
+              </button>
+
+              <button
+                class="ghost"
+                data-filter="MOSSA"
+              >
+                MOSSA
+              </button>
+
+              <button
+                class="ghost"
+                data-filter="飛輪心率"
+              >
+                飛輪
+              </button>
+
+              <button
+                class="ghost"
+                data-filter="心肺肌力訓練"
+              >
+                有氧
+              </button>
+
+            </div>
+
+
+            <section class="section">
+
+              <div class="schedule-heading">
+
+                <h3>
+                  📍 ${selectedBranchName}
+                </h3>
+
+                <span class="schedule-heading-date">
+                  ${formatDateSlash(selectedDate)}
+                </span>
+
+              </div>
+
+
+              <div id="classList">
+
+                ${
+                  schedule.length
+
+                    ? schedule
+                        .map(card)
+                        .join("")
+
+                    : `
+
+                      <div class="schedule-empty">
+
+                        <div
+                          style="
+                            font-size:32px;
+                            margin-bottom:8px
+                          "
+                        >
+                          🗓️
+                        </div>
+
+                        <div
+                          style="
+                            font-weight:700;
+                            margin-bottom:6px
+                          "
+                        >
+                          本日沒有課程資料
+                        </div>
+
+                        <div
+                          style="font-size:14px"
+                        >
+                          ${selectedBranchName}
+                          ·
+                          ${formatDate(selectedDate)}
+                        </div>
+
+                      </div>
+
+                    `
+                }
+
+              </div>
+
+
+              ${
+                officialUrl
+
+                  ? `
+
+                    <div class="source">
+
+                      資料來源：
+                      World Gym Taiwan
+                      公開有氧課表。
+
+                      <br>
+
+                      本頁資料由
+                      CARDIO TAIWAN
+                      Supabase 資料庫提供。
+
+                      <br><br>
+
+                      <a
+                        href="${officialUrl}"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        查看官方課表
+                      </a>
+
+                    </div>
+
+                  `
+
+                  : ""
+
+              }
+
+            </section>
+
+          `
+
+    }
 
   `;
 
 
+  // ======================================
   // 分店選擇
+  // ======================================
 
-  const branchSelect =
+  const branchSelector =
     document.querySelector(
-      "#branchSelect"
+      "#branchSelector"
     );
 
-  if(branchSelect){
 
-    branchSelect.addEventListener(
+  if(branchSelector){
+
+    branchSelector.addEventListener(
       "change",
-      event => {
+      async event => {
 
-        changeBranch(
-          event.target.value
-        );
+        branchSelector.disabled =
+          true;
+
+        try{
+
+          await changeBranch(
+            event.target.value
+          );
+
+        }finally{
+
+          branchSelector.disabled =
+            false;
+
+        }
 
       }
     );
@@ -840,22 +1291,37 @@ function classes(){
   }
 
 
+  // ======================================
   // 日期選擇
+  // ======================================
 
-  const dateSelect =
+  const dateSelector =
     document.querySelector(
-      "#dateSelect"
+      "#dateSelector"
     );
 
-  if(dateSelect){
 
-    dateSelect.addEventListener(
+  if(dateSelector){
+
+    dateSelector.addEventListener(
       "change",
-      event => {
+      async event => {
 
-        changeDate(
-          event.target.value
-        );
+        dateSelector.disabled =
+          true;
+
+        try{
+
+          await changeDate(
+            event.target.value
+          );
+
+        }finally{
+
+          dateSelector.disabled =
+            !selectedBranchId;
+
+        }
 
       }
     );
@@ -863,10 +1329,15 @@ function classes(){
   }
 
 
+  // ======================================
   // 搜尋
+  // ======================================
 
   const search =
-    document.querySelector("#q");
+    document.querySelector(
+      "#q"
+    );
+
 
   if(search){
 
@@ -883,46 +1354,36 @@ function classes(){
 
   }
 
-}
 
-// ================================
-// OFFICIAL BRANCH URL
-// ================================
+  // ======================================
+  // 分類
+  // ======================================
 
-function getCurrentBranchUrl(){
+  document
+    .querySelectorAll(
+      "[data-filter]"
+    )
+    .forEach(button => {
 
-  const branch =
-    branches.find(
-      branch =>
-        branch.id === selectedBranchId
-    );
+      button.addEventListener(
+        "click",
+        () => {
 
-  if(
-    branch &&
-    branch.official_url
-  ){
+          filterClasses(
+            button.dataset.filter
+          );
 
-    return `
+        }
+      );
 
-      <a
-        href="${branch.official_url}"
-        target="_blank"
-        rel="noreferrer"
-      >
-        查看官方課表
-      </a>
-
-    `;
-
-  }
-
-  return "";
+    });
 
 }
 
-// ================================
-// FILTER CLASSES
-// ================================
+
+// ========================================
+// 搜尋／篩選
+// ========================================
 
 function filterClasses(q){
 
@@ -931,51 +1392,70 @@ function filterClasses(q){
       "#classList"
     );
 
-  if(!list) return;
+
+  if(!list){
+    return;
+  }
+
 
   const term =
     (q || "all")
-      .toLowerCase();
+      .toLowerCase()
+      .trim();
+
 
   const rows =
-    schedule.filter(c => {
+    schedule.filter(
+      c => {
 
-      return (
+        if(term === "all"){
+          return true;
+        }
 
-        term === "all"
 
-        ||
-
-        Object
+        return Object
           .values(c)
           .join(" ")
           .toLowerCase()
-          .includes(term)
+          .includes(term);
 
-      );
-
-    });
+      }
+    );
 
 
   list.innerHTML =
 
-    rows
-      .map(card)
-      .join("")
+    rows.length
 
-    ||
+      ? rows
+          .map(card)
+          .join("")
 
-    `
-      <div class="muted">
-        找不到符合的課程。
-      </div>
-    `;
+      : `
+
+        <div class="schedule-empty">
+
+          <div
+            style="
+              font-size:30px;
+              margin-bottom:8px
+            "
+          >
+            🔎
+          </div>
+
+          找不到符合的課程。
+
+        </div>
+
+      `;
 
 }
 
-// ================================
-// BADGES
-// ================================
+
+// ========================================
+// 勳章
+// ========================================
 
 function badgePage(){
 
@@ -1003,53 +1483,57 @@ function badgePage(){
 
     <div class="badge-grid">
 
-      ${badges.map(b => `
+      ${badges.map(
+        b => `
 
-        <article
-          class="badge ${
-            b[3]
-            ? ""
-            : "locked"
-          }"
-        >
+          <article
+            class="
+              badge
+              ${b[3] ? "" : "locked"}
+            "
+          >
 
-          <div class="badge-icon">
-            ${b[0]}
-          </div>
+            <div class="badge-icon">
+              ${b[0]}
+            </div>
 
-          <h4>
-            ${b[1]}
-          </h4>
+            <h4>
+              ${b[1]}
+            </h4>
 
-          <p>
-            ${b[2]}
-          </p>
+            <p>
+              ${b[2]}
+            </p>
 
+            ${
+              b[3]
 
-          ${
-            b[3]
+                ? `
 
-            ? `
-              <div
-                class="pill"
-                style="margin-top:12px"
-              >
-                UNLOCKED
-              </div>
-            `
+                  <div
+                    class="pill"
+                    style="margin-top:12px"
+                  >
+                    UNLOCKED
+                  </div>
 
-            : `
-              <div
-                style="margin-top:12px"
-              >
-                🔒 LOCKED
-              </div>
-            `
-          }
+                `
 
-        </article>
+                : `
 
-      `).join("")}
+                  <div
+                    style="margin-top:12px"
+                  >
+                    🔒 LOCKED
+                  </div>
+
+                `
+            }
+
+          </article>
+
+        `
+      ).join("")}
 
     </div>
 
@@ -1057,9 +1541,10 @@ function badgePage(){
 
 }
 
-// ================================
-// SOCIAL
-// ================================
+
+// ========================================
+// 社群
+// ========================================
 
 function social(){
 
@@ -1156,9 +1641,10 @@ function social(){
 
 }
 
-// ================================
-// PROFILE
-// ================================
+
+// ========================================
+// 個人
+// ========================================
 
 function profile(){
 
@@ -1170,14 +1656,13 @@ function profile(){
         T
       </div>
 
-
       <h2>
         TURBO
       </h2>
 
-
       <div class="muted">
-        Level ${Math.floor(xp / 1000) + 1}
+        Level
+        ${Math.floor(xp / 1000) + 1}
       </div>
 
 
@@ -1246,7 +1731,10 @@ function profile(){
           </b>
 
           <span class="xp">
-            ${Math.min(100, completed * 8)}%
+            ${Math.min(
+              100,
+              completed * 8
+            )}%
           </span>
 
         </div>
@@ -1255,10 +1743,12 @@ function profile(){
         <div class="progress">
 
           <i
-            style="width:${Math.min(
-              100,
-              completed * 8
-            )}%"
+            style="
+              width:${Math.min(
+                100,
+                completed * 8
+              )}%
+            "
           ></i>
 
         </div>
@@ -1271,29 +1761,47 @@ function profile(){
 
 }
 
-// ================================
+
+// ========================================
 // INIT
-// ================================
+// ========================================
 
 async function init(){
 
   try{
 
-    // 先抓分店
+    injectScheduleStyles();
 
+
+    // ① 載入分店
     await loadBranches();
 
-    // 再抓課表
 
-    await loadSchedule();
+    // ② 只有「已經有分店＋日期」
+    // 才載入課表
 
-    // 最後顯示頁面
+    if(
+      selectedBranchId &&
+      selectedDate
+    ){
+
+      await loadSchedule();
+
+    }else{
+
+      schedule = [];
+
+    }
+
+
+    // ③ 顯示目前頁面
 
     render(
       localStorage.getItem(
         "cq_tab"
       ) || "home"
     );
+
 
   }catch(error){
 
@@ -1302,14 +1810,16 @@ async function init(){
       error
     );
 
-    branches = [];
+
     schedule = [];
+
 
     render(
       localStorage.getItem(
         "cq_tab"
       ) || "home"
     );
+
 
     toast(
       "⚠️ 資料載入失敗"
@@ -1319,8 +1829,9 @@ async function init(){
 
 }
 
-// ================================
+
+// ========================================
 // START
-// ================================
+// ========================================
 
 init();
