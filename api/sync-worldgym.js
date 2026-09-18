@@ -1,6 +1,9 @@
 const WORLD_GYM_URL =
   "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
 
+/*
+ * 清理 HTML 文字
+ */
 function cleanText(text) {
   return text
     .replace(/<[^>]*>/g, " ")
@@ -10,194 +13,60 @@ function cleanText(text) {
     .trim();
 }
 
-function getSnippet(html, index, before = 2000, after = 12000) {
-  const start = Math.max(0, index - before);
-  const end = Math.min(html.length, index + after);
-
-  return html.slice(start, end);
-}
-
-function findClassLists(html) {
-  const results = [];
+/*
+ * 解析 HTML tag 的屬性
+ */
+function parseAttributes(attributeText) {
+  const result = {};
 
   const regex =
-    /<div[^>]*class=["'][^"']*\bclass_list\b[^"']*["'][^>]*>/gi;
+    /([a-zA-Z_:][a-zA-Z0-9_:-]*)\s*=\s*["']([^"']*)["']/g;
 
   let match;
 
-  while ((match = regex.exec(html)) !== null) {
-    results.push({
-      index: match.index,
-      tag: match[0]
-    });
-
-    if (results.length >= 100) break;
+  while ((match = regex.exec(attributeText)) !== null) {
+    result[match[1]] = match[2];
   }
 
-  return results;
-}
-
-function findDays(html) {
-  const results = [];
-
-  const regex =
-    /<div[^>]*class=["'][^"']*\bdaybox\b[^"']*["'][^>]*>[\s\S]{0,1200}?<\/div>/gi;
-
-  let match;
-
-  while ((match = regex.exec(html)) !== null) {
-    const block = match[0];
-
-    const valueMatch =
-      block.match(
-        /id=["']day["'][^>]*value=["']([^"']+)["']/i
-      );
-
-    const dayMatch =
-      block.match(
-        /<span[^>]*>(Mon|Tue|Wed|Thu|Fri|Sat|Sun)<\/span>/i
-      );
-
-    results.push({
-      index: match.index,
-
-      date:
-        valueMatch
-          ? valueMatch[1]
-          : null,
-
-      day:
-        dayMatch
-          ? dayMatch[1]
-          : null
-    });
-  }
-
-  return results;
+  return result;
 }
 
 /*
- * 找出 class_list 所在的最近一個 <td>
+ * 判斷 class 是否包含指定名稱
  */
-function findNearestTd(html, index) {
+function hasClass(attrs, name) {
+  if (!attrs.class) return false;
 
-  const before =
-    html.slice(
-      0,
-      index
-    );
-
-  const tdStart =
-    before.lastIndexOf("<td");
-
-  const tdEnd =
-    html.indexOf(
-      "</td>",
-      index
-    );
-
-  if (
-    tdStart === -1 ||
-    tdEnd === -1
-  ) {
-    return null;
-  }
-
-  return {
-    start: tdStart,
-    end: tdEnd + 5,
-    html:
-      html.slice(
-        tdStart,
-        tdEnd + 5
-      )
-  };
+  return attrs.class
+    .split(/\s+/)
+    .includes(name);
 }
 
 /*
- * 找 class_list 所在的最近一個 table row
+ * 解析一堂課
  */
-function findNearestTr(html, index) {
-
-  const before =
-    html.slice(
-      0,
-      index
-    );
-
-  const trStart =
-    before.lastIndexOf("<tr");
-
-  const trEnd =
-    html.indexOf(
-      "</tr>",
-      index
-    );
-
-  if (
-    trStart === -1 ||
-    trEnd === -1
-  ) {
-    return null;
-  }
-
-  return {
-    start: trStart,
-    end: trEnd + 5,
-    html:
-      html.slice(
-        trStart,
-        trEnd + 5
-      )
-  };
-}
-
-/*
- * 找課程資料
- */
-function parseClassList(
-  html,
-  index
-) {
-
-  const nextClassList =
-    html.indexOf(
-      'class="class_list',
-      index + 20
-    );
-
-  const end =
-    nextClassList === -1
-      ? Math.min(
-          html.length,
-          index + 15000
-        )
-      : nextClassList;
-
-  const block =
-    html.slice(
-      index,
-      end
-    );
+function parseClassBlock(block) {
 
   /*
    * 時間
-   *
-   * 例如：
-   * <div class="newclass_time ...">
-   *   <div>09:00<span>|</span>10:00</div>
    */
   const timeMatch =
     block.match(
-      /class=["'][^"']*newclass_time[^"']*["'][^>]*>\s*<div[^>]*>\s*(\d{2}:\d{2})\s*<span[^>]*>\|<\/span>\s*(\d{2}:\d{2})/i
+      /class=["'][^"']*newclass_time[^"']*["'][^>]*>[\s\S]*?<div[^>]*>\s*(\d{2}:\d{2})\s*<span[^>]*>\|<\/span>\s*(\d{2}:\d{2})/i
     );
 
   /*
    * 課程名稱
+   *
+   * World Gym 實際結構：
+   *
+   * newclass_type
+   *   └── a
+   *       └── BODYCOMBAT
    */
   const typeMatch =
     block.match(
-      /class=["'][^"']*newclass_type[^"']*["'][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i
+      /class=["'][^"']*newclass_type[^"']*["'][^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i
     );
 
   /*
@@ -238,53 +107,253 @@ function parseClassList(
 
     className:
       typeMatch
-        ? cleanText(
-            typeMatch[1]
-          )
+        ? cleanText(typeMatch[1])
         : null,
 
     classroom:
       classroomMatch
-        ? cleanText(
-            classroomMatch[1]
-          )
+        ? cleanText(classroomMatch[1])
         : null,
 
     teacher:
       teacherMatch
-        ? cleanText(
-            teacherMatch[1]
-          )
+        ? cleanText(teacherMatch[1])
         : null,
 
     store:
       storeMatch
-        ? cleanText(
-            storeMatch[1]
-          )
+        ? cleanText(storeMatch[1])
         : null,
 
     paid:
-      /Paid Class/i.test(
-        block
-      ),
+      /Paid Class/i.test(block),
 
     substitute:
-      /Substitute/i.test(
-        block
-      ),
+      /Substitute/i.test(block),
 
     exclusive:
-      /Exclusive/i.test(
-        block
-      ),
-
-    raw:
-      block.slice(
-        0,
-        10000
-      )
+      /Exclusive/i.test(block)
   };
+}
+
+/*
+ * 找日期 daybox
+ */
+function findDays(html) {
+
+  const results = [];
+
+  const regex =
+    /<div[^>]*class=["'][^"']*\bdaybox\b[^"']*["'][^>]*>[\s\S]{0,1500}?<\/div>/gi;
+
+  let match;
+
+  while ((match = regex.exec(html)) !== null) {
+
+    const block = match[0];
+
+    const dateMatch =
+      block.match(
+        /id=["']day["'][^>]*value=["']([^"']+)["']/i
+      );
+
+    const dayNameMatch =
+      block.match(
+        />(Mon|Tue|Wed|Thu|Fri|Sat|Sun)<\/div>/i
+      );
+
+    results.push({
+
+      index:
+        match.index,
+
+      date:
+        dateMatch
+          ? dateMatch[1]
+          : null,
+
+      day:
+        dayNameMatch
+          ? dayNameMatch[1]
+          : null
+
+    });
+  }
+
+  return results;
+}
+
+/*
+ * ==========================================================
+ * 核心：
+ *
+ * 真正追蹤 HTML 的父層結構
+ * ==========================================================
+ */
+function inspectStructure(html) {
+
+  const results = [];
+
+  /*
+   * 把 HTML 切成 tag / text
+   */
+  const tokenRegex =
+    /<!--[\s\S]*?-->|<\/?[a-zA-Z][^>]*>/g;
+
+  let match;
+
+  const stack = [];
+
+  let lastIndex = 0;
+
+  while (
+    (match = tokenRegex.exec(html)) !== null
+  ) {
+
+    const token = match[0];
+
+    /*
+     * ------------------------------------------------------
+     * 開始 tag
+     * ------------------------------------------------------
+     */
+    if (
+      /^<div\b/i.test(token)
+    ) {
+
+      const attributeText =
+        token
+          .replace(/^<div\b/i, "")
+          .replace(/>$/, "");
+
+      const attrs =
+        parseAttributes(
+          attributeText
+        );
+
+      stack.push({
+
+        tag: "div",
+
+        class:
+          attrs.class || null,
+
+        id:
+          attrs.id || null,
+
+        data:
+          Object.keys(attrs)
+            .filter(
+              key =>
+                key.startsWith(
+                  "data-"
+                )
+            )
+            .reduce(
+              (obj, key) => {
+                obj[key] =
+                  attrs[key];
+                return obj;
+              },
+              {}
+            )
+
+      });
+
+      /*
+       * 如果這個 div 就是 class_list
+       */
+      if (
+        hasClass(
+          attrs,
+          "class_list"
+        )
+      ) {
+
+        /*
+         * 找這堂課的結尾
+         */
+        const nextClass =
+          html.indexOf(
+            'class="class_list',
+            match.index + token.length
+          );
+
+        const end =
+          nextClass === -1
+            ? Math.min(
+                html.length,
+                match.index + 15000
+              )
+            : nextClass;
+
+        const block =
+          html.slice(
+            match.index,
+            end
+          );
+
+        results.push({
+
+          index:
+            match.index,
+
+          parents:
+            stack.map(
+              item => ({
+                tag:
+                  item.tag,
+
+                class:
+                  item.class,
+
+                id:
+                  item.id,
+
+                data:
+                  item.data
+              })
+            ),
+
+          data:
+            parseClassBlock(
+              block
+            )
+
+        });
+
+        /*
+         * 我們只需要前 20 堂
+         */
+        if (
+          results.length >= 20
+        ) {
+          break;
+        }
+      }
+    }
+
+    /*
+     * ------------------------------------------------------
+     * 關閉 div
+     * ------------------------------------------------------
+     */
+    else if (
+      /^<\/div\s*>/i.test(token)
+    ) {
+
+      if (
+        stack.length > 0
+      ) {
+        stack.pop();
+      }
+    }
+
+    lastIndex =
+      tokenRegex.lastIndex;
+  }
+
+  return results;
 }
 
 export default async function handler(
@@ -294,6 +363,9 @@ export default async function handler(
 
   try {
 
+    /*
+     * 取得 World Gym 官方頁面
+     */
     const response =
       await fetch(
         WORLD_GYM_URL,
@@ -308,15 +380,17 @@ export default async function handler(
     if (!response.ok) {
 
       return res.status(502).json({
-        success: false,
+
+        success:
+          false,
 
         message:
           "無法取得 World Gym 官方課表",
 
         status:
           response.status
-      });
 
+      });
     }
 
     const html =
@@ -335,19 +409,21 @@ export default async function handler(
     ) {
 
       return res.status(200).json({
-        success: false,
+
+        success:
+          false,
 
         message:
           "找不到 schedule_area",
 
         htmlLength:
           html.length
-      });
 
+      });
     }
 
     /*
-     * 課表區域
+     * 只分析課表區域
      */
     const scheduleHtml =
       html.slice(
@@ -365,171 +441,39 @@ export default async function handler(
       findDays(html);
 
     /*
-     * 課程
+     * HTML 結構
      */
-    const classLists =
-      findClassLists(
+    const structure =
+      inspectStructure(
         scheduleHtml
       );
 
     /*
-     * 分析前 15 堂
+     * 找出所有父層 class
      */
-    const samples =
-      classLists
-        .slice(0, 15)
-        .map(
-          (item, i) => {
+    const parentClasses = [];
 
-            const absoluteIndex =
-              scheduleIndex +
-              item.index;
+    structure.forEach(
+      item => {
 
-            const td =
-              findNearestTd(
-                html,
-                absoluteIndex
+        item.parents.forEach(
+          parent => {
+
+            if (
+              parent.class
+            ) {
+
+              parentClasses.push(
+                parent.class
               );
 
-            const tr =
-              findNearestTr(
-                html,
-                absoluteIndex
-              );
-
-            const data =
-              parseClassList(
-                scheduleHtml,
-                item.index
-              );
-
-            return {
-
-              number:
-                i + 1,
-
-              classListIndex:
-                absoluteIndex,
-
-              data,
-
-              td: td
-                ? {
-                    start:
-                      td.start,
-
-                    end:
-                      td.end,
-
-                    length:
-                      td.html.length,
-
-                    openingTag:
-                      td.html.slice(
-                        0,
-                        Math.min(
-                          1000,
-                          td.html.length
-                        )
-                      ),
-
-                    html:
-                      td.html.slice(
-                        0,
-                        12000
-                      )
-                  }
-                : null,
-
-              tr: tr
-                ? {
-                    start:
-                      tr.start,
-
-                    end:
-                      tr.end,
-
-                    length:
-                      tr.html.length,
-
-                    openingTag:
-                      tr.html.slice(
-                        0,
-                        Math.min(
-                          1000,
-                          tr.html.length
-                        )
-                      ),
-
-                    html:
-                      tr.html.slice(
-                        0,
-                        20000
-                      )
-                  }
-                : null
-            };
+            }
 
           }
         );
 
-    /*
-     * 找所有 td 的 class / data 屬性
-     */
-    const tdAttributes = [];
-
-    const tdRegex =
-      /<td\b([^>]*)>/gi;
-
-    let tdMatch;
-
-    while (
-      (tdMatch =
-        tdRegex.exec(
-          scheduleHtml
-        )) !== null
-    ) {
-
-      tdAttributes.push(
-        tdMatch[1]
-      );
-
-      if (
-        tdAttributes.length >= 100
-      ) {
-        break;
       }
-
-    }
-
-    /*
-     * 找所有可能代表欄位的 class
-     */
-    const columnClasses = [];
-
-    const classRegex =
-      /class=["']([^"']*(?:col|week|day|schedule|class|box)[^"']*)["']/gi;
-
-    let classMatch;
-
-    while (
-      (classMatch =
-        classRegex.exec(
-          scheduleHtml
-        )) !== null
-    ) {
-
-      columnClasses.push(
-        classMatch[1]
-      );
-
-      if (
-        columnClasses.length >= 100
-      ) {
-        break;
-      }
-
-    }
+    );
 
     /*
      * 回傳
@@ -565,35 +509,21 @@ export default async function handler(
       days,
 
       /*
-       * 課程數
+       * 課程
        */
-      classListCount:
-        classLists.length,
+      classCount:
+        structure.length,
+
+      classes:
+        structure,
 
       /*
-       * 課程樣本
+       * 所有父層 class
        */
-      sampleCount:
-        samples.length,
-
-      samples,
-
-      /*
-       * TD 結構
-       */
-      tdCount:
-        tdAttributes.length,
-
-      tdAttributes,
-
-      /*
-       * 欄位 class
-       */
-      columnClasses:
-
+      parentClasses:
         [
           ...new Set(
-            columnClasses
+            parentClasses
           )
         ]
 
@@ -615,5 +545,4 @@ export default async function handler(
     });
 
   }
-
 }
