@@ -1,85 +1,94 @@
 // ========================================
 // CARDIO TAIWAN
 // World Gym Schedule Sync
-// Step 3: Inspect World Gym page structure
+// Step 4: Inspect schedule block structure
 // ========================================
 
 const WORLD_GYM_URL =
   "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
 
 
-function getScriptUrls(html){
+function findScheduleSamples(html){
 
   const results = [];
 
-  const regex =
-    /<script[^>]+src=["']([^"']+)["']/gi;
+  const timeRegex =
+    /\b\d{2}:\d{2}\|\d{2}:\d{2}\b/g;
 
   let match;
 
-  while((match = regex.exec(html)) !== null){
+  let count = 0;
 
-    results.push(match[1]);
+
+  while(
+    (match = timeRegex.exec(html)) !== null
+    &&
+    count < 10
+  ){
+
+    const index =
+      match.index;
+
+
+    const start =
+      Math.max(
+        0,
+        index - 2500
+      );
+
+
+    const end =
+      Math.min(
+        html.length,
+        index + 5000
+      );
+
+
+    results.push({
+
+      time:
+        match[0],
+
+      html:
+        html.slice(
+          start,
+          end
+        )
+
+    });
+
+
+    count++;
 
   }
 
-  return [...new Set(results)];
+
+  return results;
 
 }
 
 
-function getInterestingUrls(html){
+function findDateAttributes(html){
 
   const results = [];
-
-  const regex =
-    /https?:\/\/[^"'<> ]+/gi;
-
-  let match;
-
-  while((match = regex.exec(html)) !== null){
-
-    const url = match[0];
-
-    const lower =
-      url.toLowerCase();
-
-    if(
-      lower.includes("api") ||
-      lower.includes("schedule") ||
-      lower.includes("class") ||
-      lower.includes("aerobic")
-    ){
-
-      results.push(url);
-
-    }
-
-  }
-
-  return [
-    ...new Set(results)
-  ].slice(0,50);
-
-}
-
-
-function getDateMatches(html){
 
   const patterns = [
 
-    /2026[-\/]09[-\/](14|15|16|17|18|19|20)/g,
+    /data-date=["'][^"']+["']/gi,
 
-    /2026[-\/]9[-\/](14|15|16|17|18|19|20)/g,
+    /data-day=["'][^"']+["']/gi,
 
-    /Sep\.?\s*(14|15|16|17|18|19|20)/gi,
+    /data-week=["'][^"']+["']/gi,
 
-    /September\s*(14|15|16|17|18|19|20)/gi
+    /data-key=["'][^"']+["']/gi,
+
+    /data-column=["'][^"']+["']/gi,
+
+    /data-index=["'][^"']+["']/gi,
+
+    /data-id=["'][^"']+["']/gi
 
   ];
-
-
-  const results = [];
 
 
   patterns.forEach(
@@ -87,6 +96,7 @@ function getDateMatches(html){
 
       const matches =
         html.match(regex) || [];
+
 
       results.push(
         ...matches
@@ -98,47 +108,41 @@ function getDateMatches(html){
 
   return [
     ...new Set(results)
-  ];
+  ].slice(0,200);
 
 }
 
 
-function getBodyCombatSample(html){
+function findScheduleClasses(html){
 
-  const keyword =
-    "BODYCOMBAT";
+  const results = [];
 
-  const index =
-    html
-      .toUpperCase()
-      .indexOf(keyword);
+  const regex =
+    /class=["'][^"']*(schedule|class|course|aerobic|calendar|week|day)[^"']*["']/gi;
+
+  let match;
 
 
-  if(index === -1){
+  while(
+    (match = regex.exec(html)) !== null
+  ){
 
-    return "";
+    results.push(
+      match[0]
+    );
+
+    if(results.length >= 200){
+
+      break;
+
+    }
 
   }
 
 
-  const start =
-    Math.max(
-      0,
-      index - 1500
-    );
-
-
-  const end =
-    Math.min(
-      html.length,
-      index + 3500
-    );
-
-
-  return html.slice(
-    start,
-    end
-  );
+  return [
+    ...new Set(results)
+  ];
 
 }
 
@@ -183,31 +187,27 @@ export default async function handler(
       await response.text();
 
 
-    const scriptUrls =
-      getScriptUrls(html);
+    const scheduleSamples =
+      findScheduleSamples(html);
 
 
-    const interestingUrls =
-      getInterestingUrls(html);
+    const dateAttributes =
+      findDateAttributes(html);
 
 
-    const dateMatches =
-      getDateMatches(html);
-
-
-    const bodyCombatSample =
-      getBodyCombatSample(html);
+    const scheduleClasses =
+      findScheduleClasses(html);
 
 
     return res.status(200).json({
 
       success:true,
 
-      branch:
-        "台北統領",
-
       source:
         "World Gym Taiwan",
+
+      branch:
+        "台北統領",
 
       status:
         response.status,
@@ -215,18 +215,14 @@ export default async function handler(
       htmlLength:
         html.length,
 
-      dateMatches,
+      scheduleSampleCount:
+        scheduleSamples.length,
 
-      scriptUrls,
+      scheduleSamples,
 
-      interestingUrls,
+      dateAttributes,
 
-      hasBodyCombat:
-        html
-          .toUpperCase()
-          .includes("BODYCOMBAT"),
-
-      bodyCombatSample
+      scheduleClasses
 
     });
 
@@ -234,7 +230,7 @@ export default async function handler(
   }catch(error){
 
     console.error(
-      "World Gym inspection error:",
+      "World Gym structure inspection error:",
       error
     );
 
@@ -244,7 +240,7 @@ export default async function handler(
       success:false,
 
       message:
-        "World Gym 頁面分析失敗",
+        "World Gym 課表結構分析失敗",
 
       error:
         error.message
