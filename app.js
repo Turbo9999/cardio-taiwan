@@ -219,6 +219,23 @@ function injectScheduleStyles(){
       text-align:center;
     }
 
+    /* ==================================
+       分店下拉選單
+       ================================== */
+
+    #branchSelector{
+      appearance:auto;
+      -webkit-appearance:auto;
+    }
+
+    #branchSelector optgroup{
+      font-weight:700;
+    }
+
+    #branchSelector option{
+      font-weight:400;
+    }
+
     @media(max-width:430px){
 
       .schedule-control-label{
@@ -975,29 +992,129 @@ function classes(){
   injectScheduleStyles();
 
 
+  // ======================================
+  // 分店選單：依縣市分組
+  // ======================================
+
+  const cityOrder = [
+
+    "基隆市",
+    "臺北市",
+    "新北市",
+    "桃園市",
+    "新竹市",
+    "新竹縣",
+    "苗栗縣",
+    "臺中市",
+    "彰化縣",
+    "南投縣",
+    "雲林縣",
+    "嘉義市",
+    "嘉義縣",
+    "臺南市",
+    "高雄市",
+    "屏東縣",
+    "宜蘭縣",
+    "花蓮縣",
+    "臺東縣"
+
+  ];
+
+
+  const groupedBranches = {};
+
+
+  branches.forEach(
+    branch => {
+
+      const city =
+        branch.city || "其他地區";
+
+
+      if(!groupedBranches[city]){
+
+        groupedBranches[city] = [];
+
+      }
+
+
+      groupedBranches[city].push(
+        branch
+      );
+
+    }
+  );
+
+
+  const sortedCities = [
+
+    ...cityOrder.filter(
+      city =>
+        groupedBranches[city]
+    ),
+
+    ...Object.keys(groupedBranches)
+      .filter(
+        city =>
+          !cityOrder.includes(city)
+      )
+      .sort(
+        (a,b) =>
+          a.localeCompare(
+            b,
+            "zh-Hant"
+          )
+      )
+
+  ];
+
+
   const branchOptions =
-    branches
+    sortedCities
       .map(
-        branch => `
+        city => {
 
-          <option
-            value="${branch.id}"
-            ${
-              branch.id === selectedBranchId
-                ? "selected"
-                : ""
-            }
-          >
-            ${branch.city || ""}
-            ${
-              branch.city
-                ? "・"
-                : ""
-            }
-            ${branch.name}
-          </option>
+          const options =
+            groupedBranches[city]
+              .sort(
+                (a,b) =>
+                  a.name.localeCompare(
+                    b.name,
+                    "zh-Hant"
+                  )
+              )
+              .map(
+                branch => `
 
-        `
+                  <option
+                    value="${branch.id}"
+                    ${
+                      branch.id === selectedBranchId
+                        ? "selected"
+                        : ""
+                    }
+                  >
+                    ${branch.name}
+                  </option>
+
+                `
+              )
+              .join("");
+
+
+          return `
+
+            <optgroup
+              label="📍 ${city}"
+            >
+
+              ${options}
+
+            </optgroup>
+
+          `;
+
+        }
       )
       .join("");
 
@@ -1363,20 +1480,22 @@ function classes(){
     .querySelectorAll(
       "[data-filter]"
     )
-    .forEach(button => {
+    .forEach(
+      button => {
 
-      button.addEventListener(
-        "click",
-        () => {
+        button.addEventListener(
+          "click",
+          () => {
 
-          filterClasses(
-            button.dataset.filter
-          );
+            filterClasses(
+              button.dataset.filter
+            );
 
-        }
-      );
+          }
+        );
 
-    });
+      }
+    );
 
 }
 
