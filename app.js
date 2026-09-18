@@ -484,6 +484,51 @@ async function loadWorldGymBranchSlugs(){
         )
       );
 
+    const expressBranchNames =
+      new Set(
+        payload.branches
+          .filter(
+            branch =>
+              branch.series === "Express"
+          )
+          .map(
+            branch =>
+              normalizedBranchName(branch.name)
+          )
+      );
+
+    // Express stores are intentionally excluded from CARDIO TAIWAN's
+    // branch selector, using World Gym's own public series classification.
+    branches =
+      branches.filter(
+        branch =>
+          !expressBranchNames.has(
+            normalizedBranchName(branch.name)
+          )
+      );
+
+    if(
+      selectedBranchId &&
+      !branches.some(
+        branch =>
+          branch.id === selectedBranchId
+      )
+    ){
+
+      selectedBranchId = "";
+      selectedBranchName = "";
+      schedule = [];
+
+      localStorage.removeItem(
+        "cq_branch_id"
+      );
+
+      localStorage.removeItem(
+        "cq_branch_name"
+      );
+
+    }
+
   }catch(error){
 
     // Keep the existing Supabase schedule path usable if the public list
