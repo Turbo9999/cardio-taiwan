@@ -398,7 +398,12 @@ async function submitAuth(event, mode){
     currentUser = result.user;
     profileName = currentUser.user_metadata?.display_name || displayName || "";
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authSession));
-    await saveCloudProfile();
+    // 新帳號可把原本這台裝置的累積資料帶入；既有帳號則以雲端資料為準。
+    if(mode === "signup"){
+      await saveCloudProfile();
+    }else{
+      await loadCloudProfile();
+    }
     toast(mode === "signup" ? "帳號建立成功！" : "登入成功！");
     render("profile");
   }catch(error){
