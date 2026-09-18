@@ -1,352 +1,314 @@
-const WORLD_GYM_URL =
-  "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
-
-function cleanText(text) {
-  return text
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function getAttribute(tag, name) {
-  const regex = new RegExp(
-    name + '=["\']([^"\']*)["\']',
-    "i"
-  );
-
-  const match = tag.match(regex);
-
-  return match ? match[1] : null;
-}
-
-function findDays(html) {
-  const results = [];
-
-  const regex =
-    /<div[^>]*class=["'][^"']*\bdaybox\b[^"']*["'][^>]*>[\s\S]{0,1200}?<\/div>/gi;
-
-  let match;
-
-  while ((match = regex.exec(html)) !== null) {
-    const block = match[0];
-
-    const dateMatch =
-      block.match(
-        /id=["']day["'][^>]*value=["']([^"']+)["']/i
-      );
-
-    results.push({
-      index: match.index,
-      date: dateMatch
-        ? dateMatch[1]
-        : null
-    });
-  }
-
-  return results;
-}
-
-function extractClassData(block) {
-
-  const timeMatch =
-    block.match(
-      /newclass_time[^>]*>[\s\S]*?(\d{2}:\d{2})\s*<span[^>]*>\|<\/span>\s*(\d{2}:\d{2})/i
-    );
-
-  const typeMatch =
-    block.match(
-      /newclass_type[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i
-    );
-
-  const classroomMatch =
-    block.match(
-      /class=["']classroom["'][^>]*>([\s\S]*?)<\/div>/i
-    );
-
-  const teacherMatch =
-    block.match(
-      /class=["']teacher["'][^>]*>([\s\S]*?)<\/div>/i
-    );
-
-  return {
-    startTime:
-      timeMatch ? timeMatch[1] : null,
-
-    endTime:
-      timeMatch ? timeMatch[2] : null,
-
-    className:
-      typeMatch
-        ? cleanText(typeMatch[1])
-        : null,
-
-    classroom:
-      classroomMatch
-        ? cleanText(classroomMatch[1])
-        : null,
-
-    teacher:
-      teacherMatch
-        ? cleanText(teacherMatch[1])
-        : null
-  };
-}
-
-function inspectWeekViews(html) {
-
-  const results = [];
-
-  const regex =
-    /<div[^>]*class=["'][^"']*\bckview_div\b[^"']*["'][^>]*>/gi;
-
-  let match;
-
-  while ((match = regex.exec(html)) !== null) {
-
-    const start = match.index;
-
-    /*
-     * 找下一個 ckview_div
-     */
-    const next =
-      html.indexOf(
-        '<div',
-        start + match[0].length
-      );
-
-    /*
-     * 不直接用下一個 div，
-     * 改用下一個 ckview_div
-     */
-    const remaining =
-      html.slice(
-        start + match[0].length
-      );
-
-    const nextView =
-      remaining.search(
-        /<div[^>]*class=["'][^"']*\bckview_div\b[^"']*["'][^>]*>/i
-      );
-
-    const end =
-      nextView === -1
-        ? Math.min(
-            html.length,
-            start + 50000
-          )
-        : start +
-          match[0].length +
-          nextView;
-
-    const block =
-      html.slice(
-        start,
-        end
-      );
-
-    /*
-     * 找這個 view 裡所有 class_list
-     */
-    const classRegex =
-      /<div[^>]*class=["'][^"']*\bclass_list\b[^"']*["'][^>]*>/gi;
-
-    const classPositions = [];
-
-    let classMatch;
-
-    while (
-      (classMatch =
-        classRegex.exec(block)) !== null
-    ) {
-
-      classPositions.push(
-        classMatch.index
-      );
-
-      if (
-        classPositions.length >= 100
-      ) {
-        break;
-      }
-    }
-
-    /*
-     * 找這個 view 前面最近的日期
-     */
-    const before =
-      html.slice(
-        Math.max(
-          0,
-          start - 15000
-        ),
-        start
-      );
-
-    const nearbyDates =
-      [
-        ...before.matchAll(
-          /2026\/\d{2}\/\d{2}/g
-        )
-      ].map(
-        item => ({
-          date:
-            item[0],
-          index:
-            item.index
-        })
-      );
-
-    /*
-     * 解析前 5 堂課
-     */
-    const classes = [];
-
-    classPositions
-      .slice(0, 5)
-      .forEach(
-        position => {
-
-          const nextClass =
-            block.indexOf(
-              'class="class_list',
-              position + 20
-            );
-
-          const classEnd =
-            nextClass === -1
-              ? Math.min(
-                  block.length,
-                  position + 12000
-                )
-              : nextClass;
-
-          const classBlock =
-            block.slice(
-              position,
-              classEnd
-            );
-
-          classes.push(
-            extractClassData(
-              classBlock
-            )
-          );
-        }
-      );
-
-    results.push({
-
-      index:
-        start,
-
-      openingTag:
-        match[0],
-
-      classListCount:
-        classPositions.length,
-
-      nearbyDates,
-
-      firstClasses:
-        classes
-
-    });
-
-    /*
-     * 最多分析 20 個 view
-     */
-    if (
-      results.length >= 20
-    ) {
-      break;
-    }
-  }
-
-  return results;
-}
-
-export default async function handler(
-  req,
-  res
-) {
+export default async function handler(req, res) {
+  const url =
+    "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
 
   try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+      },
+    });
 
-    const response =
-      await fetch(
-        WORLD_GYM_URL,
-        {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (compatible; CARDIO-TAIWAN/1.0)"
-          }
-        }
-      );
+    const html = await response.text();
 
-    if (!response.ok) {
+    // ------------------------------------------------------------
+    // 基本資訊
+    // ------------------------------------------------------------
 
-      return res.status(502).json({
-        success: false,
-        message:
-          "無法取得 World Gym 官方課表",
-        status:
-          response.status
+    const clean = (text) =>
+      text
+        ? text
+            .replace(/<script[\s\S]*?<\/script>/gi, "")
+            .replace(/<style[\s\S]*?<\/style>/gi, "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/gi, " ")
+            .replace(/&amp;/gi, "&")
+            .replace(/&quot;/gi, '"')
+            .replace(/&#39;/gi, "'")
+            .replace(/\s+/g, " ")
+            .trim()
+        : "";
+
+    const decode = (text) => {
+      return text
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/&#x27;/gi, "'")
+        .replace(/&#x2F;/gi, "/");
+    };
+
+    // ------------------------------------------------------------
+    // 1. 抓所有日期
+    // ------------------------------------------------------------
+
+    const days = [];
+
+    const dayRegex =
+      /<input[^>]*id=["']day["'][^>]*value=["']([^"']+)["'][^>]*>/gi;
+
+    let dayMatch;
+
+    while ((dayMatch = dayRegex.exec(html)) !== null) {
+      days.push({
+        index: dayMatch.index,
+        date: dayMatch[1],
       });
     }
 
-    const html =
-      await response.text();
+    // 去除重複日期
+    const uniqueDays = [];
+    const seenDates = new Set();
 
-    const days =
-      findDays(html);
+    for (const day of days) {
+      if (!seenDates.has(day.date)) {
+        seenDates.add(day.date);
+        uniqueDays.push(day);
+      }
+    }
 
-    const views =
-      inspectWeekViews(html);
+    // ------------------------------------------------------------
+    // 2. 找 schedule_area
+    // ------------------------------------------------------------
 
-    return res.status(200).json({
+    const scheduleIndex = html.indexOf('id="schedule_area"');
 
-      success:
-        true,
+    // ------------------------------------------------------------
+    // 3. 找所有 sch_classbox
+    // ------------------------------------------------------------
 
-      source:
-        "World Gym Taiwan",
+    const classboxRegex =
+      /<[^>]*class=["'][^"']*sch_classbox[^"']*["'][^>]*>/gi;
 
-      branch:
-        "台北統領",
+    const classboxes = [];
 
-      status:
-        response.status,
+    let boxMatch;
 
-      htmlLength:
-        html.length,
+    while ((boxMatch = classboxRegex.exec(html)) !== null) {
+      const start = boxMatch.index;
 
-      dayCount:
-        days.length,
+      // 往後找下一個 sch_classbox
+      const nextMatch = html.slice(start + 1).search(
+        /<[^>]*class=["'][^"']*sch_classbox[^"']*["'][^>]*>/i
+      );
 
-      days,
+      const end =
+        nextMatch === -1
+          ? Math.min(start + 30000, html.length)
+          : start + 1 + nextMatch;
 
-      viewCount:
-        views.length,
+      const block = html.slice(start, end);
 
-      views
+      classboxes.push({
+        index: start,
+        length: block.length,
+        openingTag: boxMatch[0],
+        text: clean(block).slice(0, 1500),
+        datesBefore: uniqueDays
+          .filter((d) => d.index < start)
+          .slice(-10)
+          .map((d) => d.date),
+      });
+    }
 
+    // ------------------------------------------------------------
+    // 4. 分析每一個 sch_classbox 裡面有多少 class_list
+    // ------------------------------------------------------------
+
+    const inspectBoxes = classboxes.slice(0, 50).map((box, boxIndex) => {
+      const start = box.index;
+
+      const nextBox = classboxes[boxIndex + 1];
+
+      const end = nextBox
+        ? nextBox.index
+        : Math.min(start + 30000, html.length);
+
+      const block = html.slice(start, end);
+
+      // class_list
+      const classListRegex =
+        /<[^>]*class=["'][^"']*class_list[^"']*["'][^>]*>/gi;
+
+      const classLists = [];
+
+      let classListMatch;
+
+      while ((classListMatch = classListRegex.exec(block)) !== null) {
+        const clsStart = classListMatch.index;
+
+        const snippet = block.slice(
+          clsStart,
+          Math.min(clsStart + 5000, block.length)
+        );
+
+        const text = clean(snippet);
+
+        // 找時間
+        const timeMatch = text.match(
+          /\b([0-2]\d:[0-5]\d)\s*\|\s*([0-2]\d:[0-5]\d)\b/
+        );
+
+        // 找教室
+        const roomMatch = text.match(
+          /(4F團體有氧教室|3F飛輪教室|團體有氧教室|飛輪教室)/
+        );
+
+        classLists.push({
+          index: clsStart,
+          time: timeMatch
+            ? {
+                start: timeMatch[1],
+                end: timeMatch[2],
+              }
+            : null,
+          classroom: roomMatch ? roomMatch[1] : null,
+          text: text.slice(0, 800),
+        });
+      }
+
+      // ----------------------------------------------------------
+      // 嘗試從 classbox 的 HTML 找日期
+      // ----------------------------------------------------------
+
+      const datesInside = [];
+
+      const datePatterns = [
+        /\b20\d{2}\/\d{2}\/\d{2}\b/g,
+        /\b20\d{2}-\d{2}-\d{2}\b/g,
+      ];
+
+      for (const pattern of datePatterns) {
+        const matches = block.match(pattern) || [];
+
+        for (const date of matches) {
+          if (!datesInside.includes(date)) {
+            datesInside.push(date);
+          }
+        }
+      }
+
+      // ----------------------------------------------------------
+      // 找 classbox 上的 id / data-* / name 等屬性
+      // ----------------------------------------------------------
+
+      const attributes = {};
+
+      const openingTag = box.openingTag;
+
+      const attrRegex =
+        /\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)=["']([^"']*)["']/g;
+
+      let attrMatch;
+
+      while ((attrMatch = attrRegex.exec(openingTag)) !== null) {
+        const key = attrMatch[1];
+        const value = decode(attrMatch[2]);
+
+        attributes[key] = value;
+      }
+
+      return {
+        boxIndex,
+        htmlIndex: start,
+        htmlLength: block.length,
+        attributes,
+        datesInside,
+        datesBefore: box.datesBefore,
+        classListCount: classLists.length,
+        firstClasses: classLists.slice(0, 8),
+        textPreview: clean(block).slice(0, 1500),
+      };
     });
 
+    // ------------------------------------------------------------
+    // 5. 找所有 type_box
+    // ------------------------------------------------------------
+
+    const typeBoxRegex =
+      /<[^>]*class=["'][^"']*type_box[^"']*["'][^>]*>/gi;
+
+    const typeBoxes = [];
+
+    let typeMatch;
+
+    while ((typeMatch = typeBoxRegex.exec(html)) !== null) {
+      const start = typeMatch.index;
+
+      const snippet = html.slice(
+        start,
+        Math.min(start + 10000, html.length)
+      );
+
+      typeBoxes.push({
+        index: start,
+        openingTag: typeMatch[0],
+        text: clean(snippet).slice(0, 1200),
+      });
+    }
+
+    // ------------------------------------------------------------
+    // 6. 找 schedule_area 後的前幾個 sch_classbox 原始片段
+    // ------------------------------------------------------------
+
+    let schedulePreview = null;
+
+    if (scheduleIndex !== -1) {
+      schedulePreview = clean(
+        html.slice(scheduleIndex, scheduleIndex + 20000)
+      ).slice(0, 6000);
+    }
+
+    // ------------------------------------------------------------
+    // 7. 找 class_list 的總數
+    // ------------------------------------------------------------
+
+    const totalClassLists = (
+      html.match(
+        /<[^>]*class=["'][^"']*class_list[^"']*["'][^>]*>/gi
+      ) || []
+    ).length;
+
+    // ------------------------------------------------------------
+    // 8. 回傳診斷資料
+    // ------------------------------------------------------------
+
+    return res.status(200).json({
+      success: true,
+      version: "v14",
+      source: "World Gym Taiwan",
+      branch: "台北統領",
+      status: response.status,
+      htmlLength: html.length,
+
+      dayCount: uniqueDays.length,
+      days: uniqueDays,
+
+      scheduleIndex,
+
+      totalClassLists,
+
+      schClassboxCount: classboxes.length,
+
+      typeBoxCount: typeBoxes.length,
+
+      classboxes: inspectBoxes,
+
+      typeBoxes: typeBoxes.slice(0, 20),
+
+      schedulePreview,
+    });
   } catch (error) {
-
     return res.status(500).json({
-
-      success:
-        false,
-
-      message:
-        "World Gym Sync 發生錯誤",
-
-      error:
-        error.message
-
+      success: false,
+      version: "v14",
+      error: error.message,
+      stack: error.stack,
     });
   }
 }
