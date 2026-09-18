@@ -10,16 +10,13 @@ function cleanText(text) {
     .trim();
 }
 
-function getSnippet(html, index, before = 1500, after = 10000) {
+function getSnippet(html, index, before = 2000, after = 12000) {
   const start = Math.max(0, index - before);
   const end = Math.min(html.length, index + after);
 
   return html.slice(start, end);
 }
 
-/*
- * 找出所有 class_list 的位置
- */
 function findClassLists(html) {
   const results = [];
 
@@ -40,78 +37,128 @@ function findClassLists(html) {
   return results;
 }
 
-/*
- * 嘗試找出 class_list 外面的父層結構。
- *
- * 這裡不是完整 HTML parser，
- * 而是從 class_list 往前找最近的幾層 div，
- * 把 class / id / data-* 抓出來。
- */
-function findParentCandidates(html, index) {
-  const before = html.slice(
-    Math.max(0, index - 15000),
-    index
-  );
-
-  const candidates = [];
+function findDays(html) {
+  const results = [];
 
   const regex =
-    /<div\b([^>]*)>/gi;
+    /<div[^>]*class=["'][^"']*\bdaybox\b[^"']*["'][^>]*>[\s\S]{0,1200}?<\/div>/gi;
 
   let match;
 
-  while ((match = regex.exec(before)) !== null) {
-    const attrs = match[1];
+  while ((match = regex.exec(html)) !== null) {
+    const block = match[0];
 
-    const classMatch =
-      attrs.match(
-        /class=["']([^"']+)["']/i
+    const valueMatch =
+      block.match(
+        /id=["']day["'][^>]*value=["']([^"']+)["']/i
       );
 
-    const idMatch =
-      attrs.match(
-        /id=["']([^"']+)["']/i
+    const dayMatch =
+      block.match(
+        /<span[^>]*>(Mon|Tue|Wed|Thu|Fri|Sat|Sun)<\/span>/i
       );
 
-    const dataMatches =
-      attrs.match(
-        /data-[a-zA-Z0-9_-]+=["'][^"']*["']/gi
-      ) || [];
+    results.push({
+      index: match.index,
 
-    if (
-      classMatch ||
-      idMatch ||
-      dataMatches.length > 0
-    ) {
-      candidates.push({
-        position:
-          Math.max(0, index - 15000) +
-          match.index,
+      date:
+        valueMatch
+          ? valueMatch[1]
+          : null,
 
-        className:
-          classMatch
-            ? classMatch[1]
-            : null,
-
-        id:
-          idMatch
-            ? idMatch[1]
-            : null,
-
-        data:
-          dataMatches
-      });
-    }
+      day:
+        dayMatch
+          ? dayMatch[1]
+          : null
+    });
   }
 
-  return candidates.slice(-30);
+  return results;
 }
 
 /*
- * 把一個 class_list 裡面的資料先抽出來
+ * 找出 class_list 所在的最近一個 <td>
  */
-function parseClassList(html, index) {
-  const start = index;
+function findNearestTd(html, index) {
+
+  const before =
+    html.slice(
+      0,
+      index
+    );
+
+  const tdStart =
+    before.lastIndexOf("<td");
+
+  const tdEnd =
+    html.indexOf(
+      "</td>",
+      index
+    );
+
+  if (
+    tdStart === -1 ||
+    tdEnd === -1
+  ) {
+    return null;
+  }
+
+  return {
+    start: tdStart,
+    end: tdEnd + 5,
+    html:
+      html.slice(
+        tdStart,
+        tdEnd + 5
+      )
+  };
+}
+
+/*
+ * 找 class_list 所在的最近一個 table row
+ */
+function findNearestTr(html, index) {
+
+  const before =
+    html.slice(
+      0,
+      index
+    );
+
+  const trStart =
+    before.lastIndexOf("<tr");
+
+  const trEnd =
+    html.indexOf(
+      "</tr>",
+      index
+    );
+
+  if (
+    trStart === -1 ||
+    trEnd === -1
+  ) {
+    return null;
+  }
+
+  return {
+    start: trStart,
+    end: trEnd + 5,
+    html:
+      html.slice(
+        trStart,
+        trEnd + 5
+      )
+  };
+}
+
+/*
+ * 找課程資料
+ */
+function parseClassList(
+  html,
+  index
+) {
 
   const nextClassList =
     html.indexOf(
@@ -128,14 +175,21 @@ function parseClassList(html, index) {
       : nextClassList;
 
   const block =
-    html.slice(start, end);
+    html.slice(
+      index,
+      end
+    );
 
   /*
    * 時間
+   *
+   * 例如：
+   * <div class="newclass_time ...">
+   *   <div>09:00<span>|</span>10:00</div>
    */
   const timeMatch =
     block.match(
-      /class=["'][^"']*newclass_time[^"']*["'][^>]*>[\s\S]{0,500}?<div[^>]*>([\s\S]{0,100})<\/div>/i
+      /class=["'][^"']*newclass_time[^"']*["'][^>]*>\s*<div[^>]*>\s*(\d{2}:\d{2})\s*<span[^>]*>\|<\/span>\s*(\d{2}:\d{2})/i
     );
 
   /*
@@ -143,7 +197,7 @@ function parseClassList(html, index) {
    */
   const typeMatch =
     block.match(
-      /class=["'][^"']*newclass_type[^"']*["'][^>]*>[\s\S]{0,1500}?<a[^>]*>([\s\S]*?)<\/a>/i
+      /class=["'][^"']*newclass_type[^"']*["'][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i
     );
 
   /*
@@ -170,117 +224,99 @@ function parseClassList(html, index) {
       /class=["']class_store["'][^>]*>([\s\S]*?)<\/div>/i
     );
 
-  /*
-   * 是否有 Paid / Substitute / Exclusive
-   */
-  const paid =
-    /Paid Class/i.test(block);
-
-  const substitute =
-    /Substitute/i.test(block);
-
-  const exclusive =
-    /Exclusive/i.test(block);
-
   return {
-    index,
 
-    time:
+    startTime:
       timeMatch
-        ? cleanText(timeMatch[1])
+        ? timeMatch[1]
+        : null,
+
+    endTime:
+      timeMatch
+        ? timeMatch[2]
         : null,
 
     className:
       typeMatch
-        ? cleanText(typeMatch[1])
+        ? cleanText(
+            typeMatch[1]
+          )
         : null,
 
     classroom:
       classroomMatch
-        ? cleanText(classroomMatch[1])
+        ? cleanText(
+            classroomMatch[1]
+          )
         : null,
 
     teacher:
       teacherMatch
-        ? cleanText(teacherMatch[1])
+        ? cleanText(
+            teacherMatch[1]
+          )
         : null,
 
     store:
       storeMatch
-        ? cleanText(storeMatch[1])
+        ? cleanText(
+            storeMatch[1]
+          )
         : null,
 
-    paid,
-    substitute,
-    exclusive,
+    paid:
+      /Paid Class/i.test(
+        block
+      ),
 
-    rawStart:
-      block.slice(0, 12000)
+    substitute:
+      /Substitute/i.test(
+        block
+      ),
+
+    exclusive:
+      /Exclusive/i.test(
+        block
+      ),
+
+    raw:
+      block.slice(
+        0,
+        10000
+      )
   };
 }
 
-/*
- * 找所有日期 daybox
- */
-function findDays(html) {
-  const results = [];
+export default async function handler(
+  req,
+  res
+) {
 
-  const regex =
-    /<div[^>]*class=["'][^"']*\bdaybox\b[^"']*["'][^>]*>[\s\S]{0,1200}?<\/div>/gi;
-
-  let match;
-
-  while ((match = regex.exec(html)) !== null) {
-    const valueMatch =
-      match[0].match(
-        /id=["']day["'][^>]*value=["']([^"']+)["']/i
-      );
-
-    const dayNameMatch =
-      match[0].match(
-        /class=["']dayitem[^"']*["'][\s\S]*?<span[^>]*>([^<]+)<\/span>/i
-      );
-
-    results.push({
-      index: match.index,
-
-      date:
-        valueMatch
-          ? valueMatch[1]
-          : null,
-
-      day:
-        dayNameMatch
-          ? cleanText(dayNameMatch[1])
-          : null,
-
-      html:
-        match[0]
-    });
-  }
-
-  return results;
-}
-
-export default async function handler(req, res) {
   try {
-    const response = await fetch(
-      WORLD_GYM_URL,
-      {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (compatible; CARDIO-TAIWAN/1.0)"
+
+    const response =
+      await fetch(
+        WORLD_GYM_URL,
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (compatible; CARDIO-TAIWAN/1.0)"
+          }
         }
-      }
-    );
+      );
 
     if (!response.ok) {
+
       return res.status(502).json({
         success: false,
+
         message:
           "無法取得 World Gym 官方課表",
-        status: response.status
+
+        status:
+          response.status
       });
+
     }
 
     const html =
@@ -294,16 +330,25 @@ export default async function handler(req, res) {
         'id="schedule_area"'
       );
 
-    if (scheduleIndex === -1) {
+    if (
+      scheduleIndex === -1
+    ) {
+
       return res.status(200).json({
         success: false,
+
         message:
           "找不到 schedule_area",
+
         htmlLength:
           html.length
       });
+
     }
 
+    /*
+     * 課表區域
+     */
     const scheduleHtml =
       html.slice(
         scheduleIndex,
@@ -314,13 +359,13 @@ export default async function handler(req, res) {
       );
 
     /*
-     * 找日期
+     * 日期
      */
     const days =
       findDays(html);
 
     /*
-     * 找 class_list
+     * 課程
      */
     const classLists =
       findClassLists(
@@ -328,54 +373,171 @@ export default async function handler(req, res) {
       );
 
     /*
-     * 解析前 20 堂
+     * 分析前 15 堂
      */
-    const parsedClasses =
+    const samples =
       classLists
-        .slice(0, 20)
-        .map((item, index) => {
+        .slice(0, 15)
+        .map(
+          (item, i) => {
 
-          const absoluteIndex =
-            scheduleIndex +
-            item.index;
+            const absoluteIndex =
+              scheduleIndex +
+              item.index;
 
-          return {
-            number:
-              index + 1,
+            const td =
+              findNearestTd(
+                html,
+                absoluteIndex
+              );
 
-            relativeIndex:
-              item.index,
+            const tr =
+              findNearestTr(
+                html,
+                absoluteIndex
+              );
 
-            absoluteIndex,
-
-            data:
+            const data =
               parseClassList(
                 scheduleHtml,
                 item.index
-              ),
+              );
 
-            parentCandidates:
-              findParentCandidates(
-                html,
-                absoluteIndex
-              )
-          };
-        });
+            return {
+
+              number:
+                i + 1,
+
+              classListIndex:
+                absoluteIndex,
+
+              data,
+
+              td: td
+                ? {
+                    start:
+                      td.start,
+
+                    end:
+                      td.end,
+
+                    length:
+                      td.html.length,
+
+                    openingTag:
+                      td.html.slice(
+                        0,
+                        Math.min(
+                          1000,
+                          td.html.length
+                        )
+                      ),
+
+                    html:
+                      td.html.slice(
+                        0,
+                        12000
+                      )
+                  }
+                : null,
+
+              tr: tr
+                ? {
+                    start:
+                      tr.start,
+
+                    end:
+                      tr.end,
+
+                    length:
+                      tr.html.length,
+
+                    openingTag:
+                      tr.html.slice(
+                        0,
+                        Math.min(
+                          1000,
+                          tr.html.length
+                        )
+                      ),
+
+                    html:
+                      tr.html.slice(
+                        0,
+                        20000
+                      )
+                  }
+                : null
+            };
+
+          }
+        );
 
     /*
-     * 找 schedule_area 周邊可能的日期 / 欄位資訊
+     * 找所有 td 的 class / data 屬性
      */
-    const scheduleContext =
-      getSnippet(
-        html,
-        scheduleIndex,
-        2000,
-        50000
+    const tdAttributes = [];
+
+    const tdRegex =
+      /<td\b([^>]*)>/gi;
+
+    let tdMatch;
+
+    while (
+      (tdMatch =
+        tdRegex.exec(
+          scheduleHtml
+        )) !== null
+    ) {
+
+      tdAttributes.push(
+        tdMatch[1]
       );
 
+      if (
+        tdAttributes.length >= 100
+      ) {
+        break;
+      }
+
+    }
+
+    /*
+     * 找所有可能代表欄位的 class
+     */
+    const columnClasses = [];
+
+    const classRegex =
+      /class=["']([^"']*(?:col|week|day|schedule|class|box)[^"']*)["']/gi;
+
+    let classMatch;
+
+    while (
+      (classMatch =
+        classRegex.exec(
+          scheduleHtml
+        )) !== null
+    ) {
+
+      columnClasses.push(
+        classMatch[1]
+      );
+
+      if (
+        columnClasses.length >= 100
+      ) {
+        break;
+      }
+
+    }
+
+    /*
+     * 回傳
+     */
     return res.status(200).json({
 
-      success: true,
+      success:
+        true,
 
       source:
         "World Gym Taiwan",
@@ -400,37 +562,58 @@ export default async function handler(req, res) {
       dayCount:
         days.length,
 
-      days:
-        days.slice(0, 30),
+      days,
 
       /*
-       * 課程
+       * 課程數
        */
       classListCount:
         classLists.length,
 
-      parsedClassCount:
-        parsedClasses.length,
+      /*
+       * 課程樣本
+       */
+      sampleCount:
+        samples.length,
 
-      parsedClasses,
+      samples,
 
       /*
-       * 課表附近原始 HTML
+       * TD 結構
        */
-      scheduleContext
+      tdCount:
+        tdAttributes.length,
+
+      tdAttributes,
+
+      /*
+       * 欄位 class
+       */
+      columnClasses:
+
+        [
+          ...new Set(
+            columnClasses
+          )
+        ]
 
     });
 
   } catch (error) {
 
     return res.status(500).json({
-      success: false,
+
+      success:
+        false,
 
       message:
         "World Gym Sync 發生錯誤",
 
       error:
         error.message
+
     });
+
   }
+
 }
