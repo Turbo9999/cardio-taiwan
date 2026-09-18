@@ -13,13 +13,6 @@ export default async function handler(req, res) {
       },
     });
 
-    if (!response.ok) {
-      return res.status(502).json({
-        success: false,
-        error: `World Gym returned HTTP ${response.status}`,
-      });
-    }
-
     const html = await response.text();
 
     const decode = (value = "") =>
@@ -41,50 +34,127 @@ export default async function handler(req, res) {
         .replace(/\s+/g, " ")
         .trim();
 
+    function getAttributes(tag) {
+      const attrs = {};
+
+      const regex =
+        /\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)=(["'])(.*?)\2/g;
+
+      let match;
+
+      while ((match = regex.exec(tag)) !== null) {
+        attrs[match[1]] = decode(match[3]);
+      }
+
+      return attrs;
+    }
+
     // ------------------------------------------------------------
-    // 1. 找出所有日期
+    // 日期
     // ------------------------------------------------------------
 
-    const dateMatches = [];
+    const dates = [];
+
     const dateRegex =
       /<input[^>]*id=["']day["'][^>]*value=["']([^"']+)["'][^>]*>/gi;
 
-    let match;
+    let dateMatch;
 
-    while ((match = dateRegex.exec(html)) !== null) {
-      const date = match[1];
+    while ((dateMatch = dateRegex.exec(html)) !== null) {
+      const date = dateMatch[1];
 
-      if (!dateMatches.some((item) => item.date === date)) {
-        dateMatches.push({
-          date,
-          index: match.index,
-        });
+      if (!dates.includes(date)) {
+        dates.push(date);
       }
     }
 
     // ------------------------------------------------------------
-    // 2. 找 schedule_area
+    // 找目前課表
     // ------------------------------------------------------------
 
-    const scheduleStart = html.indexOf('id="schedule_area"');
+    const scheduleIndex = html.indexOf('id="schedule_area"');
 
-    if (scheduleStart === -1) {
+    if (scheduleIndex === -1) {
       return res.status(500).json({
         success: false,
         error: "找不到 schedule_area",
       });
     }
 
-    const scheduleHtml = html.slice(scheduleStart);
+    const scheduleHtml = html.slice(scheduleIndex);
 
     // ------------------------------------------------------------
-    // 3. 找 class_list
+    // 課程名稱
+    // ------------------------------------------------------------
+
+    const knownClasses = [
+      "BODYCOMBAT®",
+      "BODYPUMP®",
+      "BODYBALANCE®",
+      "BODYJAM®",
+      "BODYSTEP®",
+      "BODYATTACK®",
+      "GROUP POWER",
+      "GROUP CENTERGY",
+      "GROUP FIGHT",
+      "GROUP BLAST",
+      "GROUP GROOVE",
+      "Step Move",
+      "Stepforce",
+      "Latin Jam",
+      "Dance Aerobics",
+      "Total Body Sculpt",
+      "Lean Flow",
+      "Hi Low",
+      "Ball Sculpt",
+      "Jazz Dance",
+      "Zumba",
+      "MV Dance",
+      "Hip Hop",
+      "Hatha Yoga",
+      "Flow Yoga",
+      "Gentle Yoga",
+      "Yoga Basic",
+      "Yoga Ball",
+      "Pilates",
+      "Stretch Yoga",
+      "Yo Yo Stretch",
+      "Interval",
+      "Fat Burning",
+      "World Ball",
+      "Aero Power",
+      "Freestyle Step",
+      "Dance Party",
+      "Aerobics Intro",
+      "Taichi Zen Martial Arts",
+      "Yogalates",
+      "Hip Hop",
+      "Double Pop",
+      "Restorative Yoga",
+      "Meridian Yoga",
+      "Power Yoga",
+      "Core Stability Enhancement Training",
+      "Explosive Power Training",
+      "Sandbag Boxing Training",
+    ];
+
+    const classroomPatterns = [
+      "4F團體有氧教室",
+      "3F飛輪教室",
+      "2F團體有氧教室",
+      "1F團體有氧教室",
+      "團體有氧教室",
+      "飛輪教室",
+    ];
+
+    // ------------------------------------------------------------
+    // 找 class_list
     // ------------------------------------------------------------
 
     const classRegex =
-      /<[^>]*class=["'][^"']*class_list[^"']*["'][^>]*>[\s\S]*?(?=<[^>]*class=["'][^"']*class_list[^"']*["']>|<\/div>\s*<\/div>\s*<\/div>)/gi;
+      /<[^>]*class=["'][^"']*\bclass_list\b[^"']*["'][^>]*>[\s\S]*?(?=<[^>]*class=["'][^"']*\bclass_list\b[^"']*["']>|$)/gi;
 
-    const rawClasses = [];
+    const classes = [];
 
     let classMatch;
 
@@ -93,10 +163,6 @@ export default async function handler(req, res) {
 
       const text = stripHtml(block);
 
-      // ----------------------------------------------------------
-      // 時間
-      // ----------------------------------------------------------
-
       const timeMatch = text.match(
         /\b([0-2]\d:[0-5]\d)\s*\|\s*([0-2]\d:[0-5]\d)\b/
       );
@@ -104,59 +170,6 @@ export default async function handler(req, res) {
       if (!timeMatch) {
         continue;
       }
-
-      const startTime = timeMatch[1];
-      const endTime = timeMatch[2];
-
-      // ----------------------------------------------------------
-      // 課程名稱
-      // ----------------------------------------------------------
-
-      const knownClasses = [
-        "BODYCOMBAT®",
-        "BODYPUMP®",
-        "BODYBALANCE®",
-        "BODYJAM®",
-        "BODYSTEP®",
-        "BODYATTACK®",
-        "DANCE®",
-        "Step Move",
-        "Stepforce",
-        "Latin Jam",
-        "Dance Aerobics",
-        "Total Body Sculpt",
-        "Lean Flow",
-        "Hi Low",
-        "Ball Sculpt",
-        "Jazz Dance",
-        "Zumba",
-        "MV Dance",
-        "Hip Hop",
-        "Hatha Yoga",
-        "Flow Yoga",
-        "Gentle Yoga",
-        "Yoga Basic",
-        "Yoga Ball",
-        "Pilates",
-        "Yo Chi",
-        "Yoga Aerobics",
-        "Interval",
-        "Fat Burning",
-        "World Ball",
-        "Aero Power",
-        "Freestyle Step",
-        "Dance Party",
-        "Aerobics Intro",
-        "Functional Training",
-        "Power Yoga",
-        "Taichi Zen Martial Arts",
-        "Yogalates",
-        "Stretch Yoga",
-        "Meridian Yoga",
-        "Core Stability Enhancement Training",
-        "Explosive Power Training",
-        "Sandbag Boxing Training",
-      ];
 
       let className = null;
 
@@ -167,20 +180,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // ----------------------------------------------------------
-      // 教室
-      // ----------------------------------------------------------
-
       let classroom = null;
-
-      const classroomPatterns = [
-        "4F團體有氧教室",
-        "3F飛輪教室",
-        "2F團體有氧教室",
-        "1F團體有氧教室",
-        "團體有氧教室",
-        "飛輪教室",
-      ];
 
       for (const room of classroomPatterns) {
         if (text.includes(room)) {
@@ -190,141 +190,157 @@ export default async function handler(req, res) {
       }
 
       // ----------------------------------------------------------
-      // 分店
-      // ----------------------------------------------------------
-
-      const storeMatch = text.match(
-        /(Taipei Tonling|台北統領|Taipei [A-Za-z]+)/
-      );
-
-      const store = storeMatch ? storeMatch[1] : "Taipei Tonling";
-
-      // ----------------------------------------------------------
-      // 取得 HTML 屬性
-      // ----------------------------------------------------------
-
-      const openingTagMatch = block.match(/^<[^>]+>/);
-
-      const attributes = {};
-
-      if (openingTagMatch) {
-        const attrRegex =
-          /\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)=["']([^"']*)["']/g;
-
-        let attrMatch;
-
-        while ((attrMatch = attrRegex.exec(openingTagMatch[0])) !== null) {
-          attributes[attrMatch[1]] = decode(attrMatch[2]);
-        }
-      }
-
-      // ----------------------------------------------------------
-      // 嘗試從 style / data 欄位取得日期或欄位位置
-      // ----------------------------------------------------------
-
-      let possibleDay = null;
-      let possibleDate = null;
-      let possibleColumn = null;
-
-      const allAttributesText = JSON.stringify(attributes);
-
-      const directDateMatch = allAttributesText.match(
-        /20\d{2}[\/-]\d{2}[\/-]\d{2}/
-      );
-
-      if (directDateMatch) {
-        possibleDate = directDateMatch[0].replace(/\//g, "-");
-      }
-
-      const dayMatch = allAttributesText.match(
-        /(?:day|date|weekday|week|column)[^0-9]*(\d{1,2})/i
-      );
-
-      if (dayMatch) {
-        possibleDay = Number(dayMatch[1]);
-      }
-
-      const styleMatch = allAttributesText.match(
-        /(?:left|margin-left|translateX)[^0-9-]*(-?\d+(?:\.\d+)?)/i
-      );
-
-      if (styleMatch) {
-        possibleColumn = Number(styleMatch[1]);
-      }
-
-      // ----------------------------------------------------------
-      // 教練
+      // 嘗試取得教練
       // ----------------------------------------------------------
 
       let instructor = null;
 
-      const instructorCandidates = [
-        "伊森",
-        "鋼鋼",
-        "謝秉瑜",
-        "Daniel Wang",
-        "小八",
-        "翔翔 H",
-        "翔翔H",
-        "小智",
-        "Vivian",
-        "Kyle",
-        "Torrance",
-        "Benson",
-        "Jin",
-        "Teily",
-        "Wayne",
-        "EJ",
-        "安妮",
-        "Antonia",
-        "Hsuan",
-        "Calvin",
-        "恬恬",
-        "Xavier",
-      ];
+      const instructorText = text
+        .replace(timeMatch[0], "")
+        .replace(className || "", "")
+        .replace(classroom || "", "");
 
-      for (const person of instructorCandidates) {
-        if (text.includes(person)) {
-          instructor = person;
-          break;
+      const instructorParts = instructorText
+        .split(/\s+/)
+        .filter(Boolean);
+
+      if (instructorParts.length > 0) {
+        instructor = instructorParts[instructorParts.length - 1];
+      }
+
+      // ----------------------------------------------------------
+      // ⭐ 找 class_ribo
+      // ----------------------------------------------------------
+
+      const riboMatches = [];
+
+      const riboRegex =
+        /<[^>]*class=["'][^"']*\bclass_ribo\b[^"']*["'][^>]*>/gi;
+
+      let riboMatch;
+
+      while ((riboMatch = riboRegex.exec(block)) !== null) {
+        riboMatches.push({
+          tag: riboMatch[0],
+          attributes: getAttributes(riboMatch[0]),
+        });
+      }
+
+      // ----------------------------------------------------------
+      // ⭐ 找所有可能與位置有關的元素
+      // ----------------------------------------------------------
+
+      const positionalElements = [];
+
+      const tagRegex =
+        /<(div|span|a|li|td|section|article|p)[^>]*>/gi;
+
+      let tagMatch;
+
+      while ((tagMatch = tagRegex.exec(block)) !== null) {
+        const tag = tagMatch[0];
+        const attributes = getAttributes(tag);
+
+        const attrText = JSON.stringify(attributes).toLowerCase();
+
+        const interesting =
+          attrText.includes("left") ||
+          attrText.includes("top") ||
+          attrText.includes("width") ||
+          attrText.includes("translate") ||
+          attrText.includes("column") ||
+          attrText.includes("day") ||
+          attrText.includes("date") ||
+          attrText.includes("week") ||
+          attrText.includes("style") ||
+          attrText.includes("data-");
+
+        if (interesting) {
+          positionalElements.push({
+            tag,
+            attributes,
+          });
         }
       }
 
       // ----------------------------------------------------------
-      // 標記
+      // 找 style 裡面的 left / width / translateX
       // ----------------------------------------------------------
 
-      const exclusive = text.includes("獨家") || text.includes("Exclusive");
+      const styles = [];
 
-      const substitute =
-        text.includes("代課") || text.includes("Substitute");
+      const styleRegex =
+        /style=["']([^"']+)["']/gi;
 
-      rawClasses.push({
-        startTime,
-        endTime,
+      let styleMatch;
+
+      while ((styleMatch = styleRegex.exec(block)) !== null) {
+        const style = decode(styleMatch[1]);
+
+        const left = style.match(
+          /(?:left|margin-left)\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%|rem)?/i
+        );
+
+        const width = style.match(
+          /width\s*:\s*(-?\d+(?:\.\d+)?)\s*(px|%|rem)?/i
+        );
+
+        const translate = style.match(
+          /translateX\s*\(\s*(-?\d+(?:\.\d+)?)\s*(px|%|rem)?/i
+        );
+
+        styles.push({
+          raw: style,
+          left: left
+            ? {
+                value: Number(left[1]),
+                unit: left[2] || null,
+              }
+            : null,
+          width: width
+            ? {
+                value: Number(width[1]),
+                unit: width[2] || null,
+              }
+            : null,
+          translateX: translate
+            ? {
+                value: Number(translate[1]),
+                unit: translate[2] || null,
+              }
+            : null,
+        });
+      }
+
+      classes.push({
+        startTime: timeMatch[1],
+        endTime: timeMatch[2],
         className,
         classroom,
         instructor,
-        store,
-        exclusive,
-        substitute,
-        possibleDate,
-        possibleDay,
-        possibleColumn,
-        attributes,
-        text: text.slice(0, 1200),
+
+        text: text.slice(0, 1000),
+
+        ribo: riboMatches,
+
+        positionalElements,
+
+        styles,
+
+        // 方便我們確認原始 HTML
+        htmlPreview: block.slice(0, 5000),
       });
     }
 
     // ------------------------------------------------------------
-    // 4. 去除完全重複資料
+    // 去重
     // ------------------------------------------------------------
 
-    const classes = [];
+    const unique = [];
 
     const seen = new Set();
 
-    for (const item of rawClasses) {
+    for (const item of classes) {
       const key = [
         item.startTime,
         item.endTime,
@@ -336,23 +352,37 @@ export default async function handler(req, res) {
 
       if (!seen.has(key)) {
         seen.add(key);
-        classes.push(item);
+        unique.push(item);
       }
     }
 
     // ------------------------------------------------------------
-    // 5. 產生日期清單
+    // 統計位置資訊
     // ------------------------------------------------------------
 
-    const dates = dateMatches.map((item) => item.date);
+    const styleSummary = [];
 
-    // ------------------------------------------------------------
-    // 6. 回傳
-    // ------------------------------------------------------------
+    for (const item of unique) {
+      for (const style of item.styles) {
+        if (
+          style.left ||
+          style.width ||
+          style.translateX
+        ) {
+          styleSummary.push({
+            className: item.className,
+            time: `${item.startTime}-${item.endTime}`,
+            instructor: item.instructor,
+            style,
+          });
+        }
+      }
+    }
 
     return res.status(200).json({
       success: true,
-      version: "worldgym-sync-1",
+      version: "worldgym-position-analysis-1",
+
       source: "World Gym Taiwan",
       branch: "台北統領",
 
@@ -363,9 +393,11 @@ export default async function handler(req, res) {
       dateCount: dates.length,
       dates,
 
-      classCount: classes.length,
+      classCount: unique.length,
 
-      classes,
+      classes: unique.slice(0, 30),
+
+      styleSummary: styleSummary.slice(0, 50),
     });
   } catch (error) {
     return res.status(500).json({
