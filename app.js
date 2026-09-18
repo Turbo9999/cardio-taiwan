@@ -10,9 +10,38 @@ const SUPABASE_PUBLISHABLE_KEY =
 
 let branches = [];
 let schedule = [];
+let worldGymBranchSlugs = new Map();
 
 
-function worldGymBranchSlug(officialUrl){
+function normalizedBranchName(name){
+
+  return String(name || "")
+    .replace(/\s+/g, "")
+    .replace(/World\s*Gym/gi, "")
+    .trim();
+
+}
+
+
+function worldGymBranchSlug(officialUrl, branchName = ""){
+
+  // Supabase currently has both「台北統領」and「台北統領店」,
+  // but only the first record carries the official URL. They are the same club.
+  if(
+    branchName === "台北統領" ||
+    branchName === "台北統領店"
+  ){
+    return "taipei-tonling";
+  }
+
+  const listedSlug =
+    worldGymBranchSlugs.get(
+      normalizedBranchName(branchName)
+    );
+
+  if(listedSlug){
+    return listedSlug;
+  }
 
   if(!officialUrl){
     return "";
@@ -401,6 +430,46 @@ async function loadBranches(){
 }
 
 
+// World Gym's public Find a Club response supplies the authoritative mapping
+// from each Taiwanese branch name to its public schedule-page slug.
+async function loadWorldGymBranchSlugs(){
+
+  try{
+
+    const response =
+      await fetch("/api/worldgym-branches");
+
+    const payload =
+      await response.json();
+
+    if(!response.ok || !payload.success){
+      throw new Error(payload.error || "World Gym 分店清單載入失敗");
+    }
+
+    worldGymBranchSlugs =
+      new Map(
+        payload.branches.map(
+          branch => [
+            normalizedBranchName(branch.name),
+            branch.slug
+          ]
+        )
+      );
+
+  }catch(error){
+
+    // Keep the existing Supabase schedule path usable if the public list
+    // is temporarily unavailable.
+    console.warn(
+      "World Gym branch list error:",
+      error
+    );
+
+  }
+
+}
+
+
 // ========================================
 // 載入指定分店＋指定日期
 // ========================================
@@ -434,7 +503,8 @@ async function loadSchedule(){
 
   const branchSlug =
     worldGymBranchSlug(
-      selectedBranch?.official_url
+      selectedBranch?.official_url,
+      selectedBranch?.name
     );
 
 
@@ -1194,15 +1264,29 @@ function classes(){
       .join("");
 
 
-  const officialUrl =
+  const selectedBranchDetails =
     branches.find(
       b =>
         b.id === selectedBranchId
-    )?.official_url || "";
+    );
+
+  const displayBranchSlug =
+    worldGymBranchSlug(
+      selectedBranchDetails?.official_url,
+      selectedBranchDetails?.name
+    );
+
+  const officialUrl =
+    selectedBranchDetails?.official_url ||
+    (
+      displayBranchSlug
+        ? `https://www.worldgymtaiwan.com/en/find-a-club/${displayBranchSlug}/aerobics-class-schedule`
+        : ""
+    );
 
   const hasLiveWorldGymSchedule =
     Boolean(
-      worldGymBranchSlug(officialUrl)
+      displayBranchSlug
     );
 
 
@@ -1977,8 +2061,11 @@ async function init(){
     // ① 載入分店
     await loadBranches();
 
+    // ② 載入 World Gym 公開分店對應，不影響既有 Supabase 資料。
+    await loadWorldGymBranchSlugs();
 
-    // ② 只有「已經有分店＋日期」
+
+    // ③ 只有「已經有分店＋日期」
     // 才載入課表
 
     if(
@@ -1995,7 +2082,7 @@ async function init(){
     }
 
 
-    // ③ 顯示目前頁面
+    // ④ 顯示目前頁面
 
     render(
       localStorage.getItem(
