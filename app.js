@@ -76,6 +76,9 @@ let selectedBranchId =
 let selectedBranchName =
   localStorage.getItem("cq_branch_name") || "";
 
+let selectedCity =
+  localStorage.getItem("cq_city") || "";
+
 let selectedDate =
   localStorage.getItem("cq_date") || "";
 
@@ -410,6 +413,14 @@ async function loadBranches(){
       selectedBranchName =
         savedBranch.name;
 
+      selectedCity =
+        savedBranch.city || "";
+
+      localStorage.setItem(
+        "cq_city",
+        selectedCity
+      );
+
     }else{
 
       selectedBranchId = "";
@@ -424,6 +435,23 @@ async function loadBranches(){
       );
 
     }
+
+  }
+
+
+  if(
+    selectedCity &&
+    !branches.some(
+      branch =>
+        branch.city === selectedCity
+    )
+  ){
+
+    selectedCity = "";
+
+    localStorage.removeItem(
+      "cq_city"
+    );
 
   }
 
@@ -633,6 +661,9 @@ async function changeBranch(
   selectedBranchName =
     branch.name;
 
+  selectedCity =
+    branch.city || "";
+
 
   localStorage.setItem(
     "cq_branch_id",
@@ -642,6 +673,11 @@ async function changeBranch(
   localStorage.setItem(
     "cq_branch_name",
     selectedBranchName
+  );
+
+  localStorage.setItem(
+    "cq_city",
+    selectedCity
   );
 
 
@@ -657,6 +693,36 @@ async function changeBranch(
     render("classes");
 
   }
+
+}
+
+
+// ========================================
+// 選擇縣市
+// ========================================
+
+function changeCity(city){
+
+  selectedCity = city;
+
+  localStorage.setItem(
+    "cq_city",
+    selectedCity
+  );
+
+  selectedBranchId = "";
+  selectedBranchName = "";
+  schedule = [];
+
+  localStorage.removeItem(
+    "cq_branch_id"
+  );
+
+  localStorage.removeItem(
+    "cq_branch_name"
+  );
+
+  render("classes");
 
 }
 
@@ -1214,52 +1280,38 @@ function classes(){
   ];
 
 
-  const branchOptions =
+  const cityOptions =
     sortedCities
       .map(
-        city => {
+        city => `
+          <option
+            value="${city}"
+            ${city === selectedCity ? "selected" : ""}
+          >
+            ${city}
+          </option>
+        `
+      )
+      .join("");
 
-          const options =
-            groupedBranches[city]
-              .sort(
-                (a,b) =>
-                  a.name.localeCompare(
-                    b.name,
-                    "zh-Hant"
-                  )
-              )
-              .map(
-                branch => `
-
-                  <option
-                    value="${branch.id}"
-                    ${
-                      branch.id === selectedBranchId
-                        ? "selected"
-                        : ""
-                    }
-                  >
-                    ${branch.name}
-                  </option>
-
-                `
-              )
-              .join("");
-
-
-          return `
-
-            <optgroup
-              label="📍 ${city}"
-            >
-
-              ${options}
-
-            </optgroup>
-
-          `;
-
-        }
+  const branchOptions =
+    (groupedBranches[selectedCity] || [])
+      .sort(
+        (a,b) =>
+          a.name.localeCompare(
+            b.name,
+            "zh-Hant"
+          )
+      )
+      .map(
+        branch => `
+          <option
+            value="${branch.id}"
+            ${branch.id === selectedBranchId ? "selected" : ""}
+          >
+            ${branch.name}
+          </option>
+        `
       )
       .join("");
 
@@ -1298,13 +1350,39 @@ function classes(){
       <div class="schedule-control">
 
         <div class="schedule-control-label">
-          📍 分店
+          🗺️ 縣市
+        </div>
+
+        <select
+          id="citySelector"
+          class="schedule-control-input"
+        >
+
+          <option
+            value=""
+            ${!selectedCity ? "selected" : ""}
+          >
+            請選擇縣市
+          </option>
+
+          ${cityOptions}
+
+        </select>
+
+      </div>
+
+
+      <div class="schedule-control">
+
+        <div class="schedule-control-label">
+          📍 店名
         </div>
 
 
         <select
           id="branchSelector"
           class="schedule-control-input"
+          ${!selectedCity ? "disabled" : ""}
         >
 
           <option
@@ -1315,7 +1393,7 @@ function classes(){
                 : ""
             }
           >
-            請選擇分店
+            請選擇店名
           </option>
 
           ${branchOptions}
@@ -1537,7 +1615,30 @@ function classes(){
 
 
   // ======================================
-  // 分店選擇
+  // 縣市選擇
+  // ======================================
+
+  const citySelector =
+    document.querySelector(
+      "#citySelector"
+    );
+
+  if(citySelector){
+
+    citySelector.addEventListener(
+      "change",
+      event => {
+        changeCity(
+          event.target.value
+        );
+      }
+    );
+
+  }
+
+
+  // ======================================
+  // 店名選擇
   // ======================================
 
   const branchSelector =
