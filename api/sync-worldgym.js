@@ -1,7 +1,5 @@
-const SOURCE_URL =
-  "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
-
-const BRANCH_NO = "015";
+const WORLD_GYM_BASE_URL = "https://www.worldgymtaiwan.com/en/find-a-club";
+const DEFAULT_BRANCH_SLUG = "taipei-tonling";
 
 const MONTHS = {
   Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
@@ -31,18 +29,45 @@ function isIsoDate(value) {
   return Boolean(toIsoDate(value));
 }
 
-async function postPublicSchedule(func, values = {}) {
+function sourceUrlForBranch(branchSlug) {
+  if (!/^[a-z0-9-]+$/.test(branchSlug)) {
+    throw new Error("Invalid World Gym branch");
+  }
+  return `${WORLD_GYM_BASE_URL}/${branchSlug}/aerobics-class-schedule`;
+}
+
+async function getPublicBranchConfig(branchSlug) {
+  const sourceUrl = sourceUrlForBranch(branchSlug);
+  const response = await fetch(sourceUrl, {
+    headers: {
+      ...worldGymHeaders(),
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
+  });
+
+  if (!response.ok) throw new Error(`World Gym HTTP ${response.status} for branch page`);
+  const html = await response.text();
+  const branchNo = html.match(
+    /<input[^>]*id=["']current_branch_no["'][^>]*value=["']([^"']+)["'][^>]*>/i
+  )?.[1];
+
+  if (!branchNo) throw new Error("World Gym branch page did not provide current_branch_no");
+  return { sourceUrl, branchNo };
+}
+
+async function postPublicSchedule(sourceUrl, branchNo, func, values = {}) {
   const body = new URLSearchParams({
     func,
     first_date: "",
     last_date: "",
     scheduleType: "week",
     isMobile: "N",
-    current_branch_no: BRANCH_NO,
+    current_branch_no: branchNo,
     ...values,
   });
-  const response = await fetch(SOURCE_URL, {
+  const response = await fetch(sourceUrl, {
     method: "POST",
+    // This is the public page's own form action, not a member-only API.
     headers: worldGymHeaders(),
     body,
   });
@@ -108,14 +133,14 @@ function mapClass(item) {
   };
 }
 
-async function getWeekSchedule() {
+async function getWeekSchedule(config) {
   const [calendarLabel, dateList] = await Promise.all([
-    postPublicSchedule("queryCalendarDate"),
-    postPublicSchedule("queryNewDateList"),
+    postPublicSchedule(config.sourceUrl, config.branchNo, "queryCalendarDate"),
+    postPublicSchedule(config.sourceUrl, config.branchNo, "queryNewDateList"),
   ]);
   if (!Array.isArray(dateList)) throw new Error("World Gym returned an invalid date list");
   const dates = datesFromPublicCalendar(calendarLabel, dateList);
-  const data = await postPublicSchedule("queryWeekSchedule", {
+  const data = await postPublicSchedule(config.sourceUrl, config.branchNo, "queryWeekSchedule", {
     first_date: toWorldGymDate(dates[0]),
     last_date: toWorldGymDate(dates[dates.length - 1]),
   });
@@ -123,8 +148,8 @@ async function getWeekSchedule() {
   return { dates, data };
 }
 
-async function getDaySchedule(date) {
-  const data = await postPublicSchedule("queryDaySchedule", {
+async function getDaySchedule(config, date) {
+  const data = await postPublicSchedule(config.sourceUrl, config.branchNo, "queryDaySchedule", {
     first_date: toWorldGymDate(date),
     scheduleType: "day",
   });
@@ -139,6 +164,7 @@ export default async function handler(req, res) {
   }
 
   const requestedDate = typeof req.query?.date === "string" ? req.query.date : null;
+  const branchSlug = typeof req.query?.branch === "string" ? req.query.branch : DEFAULT_BRANCH_SLUG;
   if (requestedDate && !isIsoDate(requestedDate)) {
     return res.status(400).json({
       success: false,
@@ -147,7 +173,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const schedule = requestedDate ? await getDaySchedule(requestedDate) : await getWeekSchedule();
+    const config = await getPublicBranchConfig(branchSlug);
+    const schedule = requestedDate
+      ? await getDaySchedule(config, requestedDate)
+      : await getWeekSchedule(config);
     const classes = schedule.data.map(mapClass).filter(Boolean);
     const branchName = classes.find((item) => item.branchName)?.branchName || "Taipei Tonling";
 
@@ -155,7 +184,7 @@ export default async function handler(req, res) {
       success: true,
       source: {
         provider: "World Gym Taiwan public website",
-        endpoint: SOURCE_URL,
+        endpoint: config.sourceUrl,
         dateField: "class_date",
       },
       branch: branchName,
