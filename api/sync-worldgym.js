@@ -1,252 +1,127 @@
-// ========================================
-// CARDIO TAIWAN
-// World Gym Schedule Sync
-// Step 4: Inspect schedule block structure
-// ========================================
-
 const WORLD_GYM_URL =
   "https://www.worldgymtaiwan.com/en/find-a-club/taipei-tonling/aerobics-class-schedule";
 
-
-function findScheduleSamples(html){
-
+function getMatches(html, regex, limit = 100) {
   const results = [];
-
-  const timeRegex =
-    /\b\d{2}:\d{2}\|\d{2}:\d{2}\b/g;
-
   let match;
 
-  let count = 0;
-
-
-  while(
-    (match = timeRegex.exec(html)) !== null
-    &&
-    count < 10
-  ){
-
-    const index =
-      match.index;
-
-
-    const start =
-      Math.max(
-        0,
-        index - 2500
-      );
-
-
-    const end =
-      Math.min(
-        html.length,
-        index + 5000
-      );
-
-
+  while ((match = regex.exec(html)) !== null && results.length < limit) {
     results.push({
-
-      time:
-        match[0],
-
-      html:
-        html.slice(
-          start,
-          end
-        )
-
+      index: match.index,
+      match: match[0]
     });
-
-
-    count++;
-
   }
-
 
   return results;
-
 }
 
+function getSnippet(html, index, before = 3000, after = 12000) {
+  const start = Math.max(0, index - before);
+  const end = Math.min(html.length, index + after);
 
-function findDateAttributes(html){
+  return html.slice(start, end);
+}
 
-  const results = [];
+export default async function handler(req, res) {
+  try {
+    const response = await fetch(WORLD_GYM_URL, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; CARDIO-TAIWAN/1.0)"
+      }
+    });
 
-  const patterns = [
-
-    /data-date=["'][^"']+["']/gi,
-
-    /data-day=["'][^"']+["']/gi,
-
-    /data-week=["'][^"']+["']/gi,
-
-    /data-key=["'][^"']+["']/gi,
-
-    /data-column=["'][^"']+["']/gi,
-
-    /data-index=["'][^"']+["']/gi,
-
-    /data-id=["'][^"']+["']/gi
-
-  ];
-
-
-  patterns.forEach(
-    regex => {
-
-      const matches =
-        html.match(regex) || [];
-
-
-      results.push(
-        ...matches
-      );
-
+    if (!response.ok) {
+      return res.status(502).json({
+        success: false,
+        message: "無法取得 World Gym 官方課表",
+        status: response.status
+      });
     }
-  );
 
+    const html = await response.text();
 
-  return [
-    ...new Set(results)
-  ].slice(0,200);
-
-}
-
-
-function findScheduleClasses(html){
-
-  const results = [];
-
-  const regex =
-    /class=["'][^"']*(schedule|class|course|aerobic|calendar|week|day)[^"']*["']/gi;
-
-  let match;
-
-
-  while(
-    (match = regex.exec(html)) !== null
-  ){
-
-    results.push(
-      match[0]
+    // 找 daybox
+    const dayboxMatches = getMatches(
+      html,
+      /class=["'][^"']*daybox[^"']*["']/gi,
+      20
     );
 
-    if(results.length >= 200){
+    // 找 newclass_time
+    const newclassTimeMatches = getMatches(
+      html,
+      /class=["'][^"']*newclass_time[^"']*["']/gi,
+      20
+    );
 
-      break;
+    // 找 newclass_type
+    const newclassTypeMatches = getMatches(
+      html,
+      /class=["'][^"']*newclass_type[^"']*["']/gi,
+      20
+    );
 
-    }
+    // 找 classroom
+    const classroomMatches = getMatches(
+      html,
+      /class=["'][^"']*classroom[^"']*["']/gi,
+      20
+    );
 
-  }
+    // 找日期文字
+    const dateMatches = getMatches(
+      html,
+      /2026[\/.-]\d{1,2}[\/.-]\d{1,2}|Sep\.\s*\d{1,2}/gi,
+      50
+    );
 
+    // 取前幾個 daybox 的完整附近內容
+    const dayboxSamples = dayboxMatches.slice(0, 7).map((item, i) => ({
+      number: i + 1,
+      index: item.index,
+      match: item.match,
+      html: getSnippet(html, item.index, 1000, 16000)
+    }));
 
-  return [
-    ...new Set(results)
-  ];
-
-}
-
-
-export default async function handler(
-  req,
-  res
-){
-
-  try{
-
-    const response =
-      await fetch(
-        WORLD_GYM_URL,
-        {
-          headers:{
-            "User-Agent":
-              "Mozilla/5.0 (compatible; CARDIO-TAIWAN/1.0)"
-          }
-        }
-      );
-
-
-    if(!response.ok){
-
-      return res.status(502).json({
-
-        success:false,
-
-        message:
-          "無法取得 World Gym 官方課表",
-
-        status:
-          response.status
-
-      });
-
-    }
-
-
-    const html =
-      await response.text();
-
-
-    const scheduleSamples =
-      findScheduleSamples(html);
-
-
-    const dateAttributes =
-      findDateAttributes(html);
-
-
-    const scheduleClasses =
-      findScheduleClasses(html);
-
+    // 取第一批 newclass_time 周邊 HTML
+    const timeSamples = newclassTimeMatches.slice(0, 10).map((item, i) => ({
+      number: i + 1,
+      index: item.index,
+      match: item.match,
+      html: getSnippet(html, item.index, 1500, 5000)
+    }));
 
     return res.status(200).json({
+      success: true,
+      source: "World Gym Taiwan",
+      branch: "台北統領",
+      status: response.status,
+      htmlLength: html.length,
 
-      success:true,
+      dateMatches: dateMatches.map(x => x.match),
 
-      source:
-        "World Gym Taiwan",
+      dayboxCount: dayboxMatches.length,
+      dayboxMatches: dayboxMatches.map(x => x.match),
+      dayboxSamples,
 
-      branch:
-        "台北統領",
+      newclassTimeCount: newclassTimeMatches.length,
+      newclassTimeMatches: newclassTimeMatches.map(x => x.match),
 
-      status:
-        response.status,
+      newclassTypeCount: newclassTypeMatches.length,
+      newclassTypeMatches: newclassTypeMatches.map(x => x.match),
 
-      htmlLength:
-        html.length,
+      classroomCount: classroomMatches.length,
+      classroomMatches: classroomMatches.map(x => x.match),
 
-      scheduleSampleCount:
-        scheduleSamples.length,
-
-      scheduleSamples,
-
-      dateAttributes,
-
-      scheduleClasses
-
+      timeSamples
     });
 
-
-  }catch(error){
-
-    console.error(
-      "World Gym structure inspection error:",
-      error
-    );
-
-
+  } catch (error) {
     return res.status(500).json({
-
-      success:false,
-
-      message:
-        "World Gym 課表結構分析失敗",
-
-      error:
-        error.message
-
+      success: false,
+      message: "World Gym Sync 發生錯誤",
+      error: error.message
     });
-
   }
-
 }
