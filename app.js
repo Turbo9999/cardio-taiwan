@@ -243,9 +243,44 @@ function injectScheduleStyles(){
     }
 
     .schedule-date-input{
-      color-scheme:var(--date-scheme, dark);
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      opacity:0;
+      cursor:pointer;
+      z-index:1;
+    }
+
+    .schedule-date-wrap{
+      flex:1;
+      min-width:0;
+      height:52px;
+      position:relative;
+    }
+
+    .schedule-date-wrap.is-disabled{
+      opacity:.5;
+    }
+
+    .schedule-date-display{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      padding:0 14px;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:var(--panel);
+      color:var(--text);
+      font-size:16px;
       text-align:left;
-      -webkit-text-align:left;
+      pointer-events:none;
+    }
+
+    .schedule-date-wrap:focus-within .schedule-date-display{
+      border-color:var(--accent);
+      box-shadow:0 0 0 2px rgba(233,79,155,.12);
     }
 
     .schedule-empty{
@@ -317,6 +352,14 @@ function injectScheduleStyles(){
 
       .schedule-control-input{
         height:50px;
+        font-size:15px;
+      }
+
+      .schedule-date-wrap{
+        height:50px;
+      }
+
+      .schedule-date-display{
         font-size:15px;
       }
 
@@ -1680,17 +1723,16 @@ function classes(){
         </div>
 
 
-        <input
-          id="dateSelector"
-          class="schedule-control-input schedule-date-input"
-          type="date"
-          value="${selectedDate}"
-          ${
-            !selectedBranchId
-              ? "disabled"
-              : ""
-          }
-        >
+        <div class="schedule-date-wrap ${!selectedBranchId ? "is-disabled" : ""}">
+          <input
+            id="dateSelector"
+            class="schedule-date-input"
+            type="date"
+            value="${selectedDate}"
+            ${!selectedBranchId ? "disabled" : ""}
+          >
+          <div class="schedule-date-display">${formatDate(selectedDate)}</div>
+        </div>
 
       </div>
 
