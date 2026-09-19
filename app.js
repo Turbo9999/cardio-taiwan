@@ -1481,6 +1481,9 @@ function home(){
 
 function card(c){
 
+  const courseLabel = bilingualCourseName(c.name);
+  const courseSize = courseLabel.length > 24 ? " compact" : courseLabel.length > 18 ? " tight" : "";
+
   return `
 
     <article class="class-card">
@@ -1493,8 +1496,8 @@ function card(c){
             ${c.time} - ${c.end}${c.substitute ? "（代）" : ""}
           </div>
 
-          <div class="class-name">
-            ${bilingualCourseName(c.name)}
+          <div class="class-name${courseSize}">
+            ${courseLabel}
           </div>
 
           <div class="class-meta">
@@ -1502,10 +1505,6 @@ function card(c){
             ${c.room}
             · 教練
             ${c.instructor}
-
-            <br>
-
-            ${c.type}
 
           </div>
 
