@@ -1086,6 +1086,36 @@ function saveTask(c){
   render("home");
 }
 
+function taskExpired(task){
+  const end = new Date(`${task.date}T${task.end || task.time}:00`);
+  return !Number.isNaN(end.getTime()) && new Date() > new Date(end.getTime() + 3600000);
+}
+
+function bindTaskSwipe(){
+  document.querySelectorAll(".saved-task[data-task-index]").forEach(element => {
+    let startX = 0;
+    element.addEventListener("touchstart", event => { startX = event.touches[0].clientX; }, { passive:true });
+    element.addEventListener("touchend", event => {
+      if(event.changedTouches[0].clientX - startX > -70) return;
+      const index = Number(element.dataset.taskIndex);
+      savedTasks.splice(index, 1);
+      localStorage.setItem("cq_saved_tasks", JSON.stringify(savedTasks));
+      toast("任務已移除");
+      render("home");
+    }, { passive:true });
+  });
+}
+
+function bilingualCourseName(name){
+  const pairs = [
+    ["BODYCOMBAT", "有氧格鬥"], ["BODYPUMP", "槓鈴肌力"], ["BODYBALANCE", "身心靈平衡"],
+    ["BODYATTACK", "有氧體能"], ["BODYJAM", "舞蹈有氧"], ["RPM", "飛輪"],
+    ["SPRINT", "高強度飛輪"], ["瑜伽", "Yoga"], ["皮拉提斯", "Pilates"], ["飛輪", "Indoor Cycling"]
+  ];
+  const found = pairs.find(([first, second]) => String(name).toUpperCase().includes(first) || String(name).includes(second));
+  return found ? `${name} · ${String(name).toUpperCase().includes(found[0]) ? found[1] : found[0]}` : name;
+}
+
 function distanceMeters(aLat, aLng, bLat, bLng){
   const rad = value => value * Math.PI / 180;
   const dLat = rad(bLat - aLat), dLng = rad(bLng - aLng);
@@ -1331,8 +1361,6 @@ function home(){
           找今天的課
         </button>
 
-        ${savedTasks.length ? `<div class="saved-task-list">${savedTasks.slice(0,3).map(task => `<div class="saved-task"><b>${escapeHtml(task.name)}</b><span>${escapeHtml(task.branchName)} · ${task.date} ${task.time}</span></div>`).join("")}</div>` : ""}
-
       </div>
 
     </section>
@@ -1386,7 +1414,14 @@ function home(){
 
     </section>
 
+    <section class="section">
+      <div class="section-title"><h3>🧩 等待解任務</h3><span>左滑可移除</span></div>
+      ${savedTasks.length ? `<div class="saved-task-list">${savedTasks.map((task, index) => `<div class="saved-task ${taskExpired(task) ? "expired" : ""}" data-task-index="${index}"><b>${escapeHtml(task.name)}${taskExpired(task) ? " · 已逾期" : ""}</b><span>${escapeHtml(task.branchName)} · ${task.date} ${task.time}${task.end ? `–${task.end}` : ""}</span></div>`).join("")}</div>` : `<div class="quest muted">從課表按「加入任務」，就會出現在這裡。</div>`}
+    </section>
+
   `;
+
+  bindTaskSwipe();
 
 }
 
@@ -1410,7 +1445,7 @@ function card(c){
           </div>
 
           <div class="class-name">
-            ${c.name}
+            ${bilingualCourseName(c.name)}
           </div>
 
           <div class="class-meta">
