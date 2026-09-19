@@ -13,7 +13,7 @@ async function requireAdmin(req, serviceKey) {
   const profileResponse = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=is_admin`, { headers: serviceHeaders(serviceKey) });
   const profiles = await profileResponse.json().catch(() => []);
   const isConfiguredAdmin = String(user.email || "").toLowerCase() === "pkddqq@gmail.com";
-  if (!profileResponse.ok || (profiles[0]?.is_admin !== true && !isConfiguredAdmin)) throw new Error("沒有後台管理權限");
+  if (profiles[0]?.is_admin !== true && !isConfiguredAdmin) throw new Error("沒有後台管理權限");
   return user;
 }
 
