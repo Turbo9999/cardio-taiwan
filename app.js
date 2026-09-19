@@ -810,6 +810,7 @@ async function loadSchedule(){
           name: item.className || "未命名課程",
           room: item.classroom || "",
           instructor: item.instructor || "",
+          substitute: Boolean(item.substitute),
           type: item.category || ""
 
         })
@@ -1479,7 +1480,7 @@ function card(c){
           </div>
 
           <div class="class-name">
-            ${bilingualCourseName(c.name)}
+            ${bilingualCourseName(c.name)}${c.substitute ? "（代）" : ""}
           </div>
 
           <div class="class-meta">
