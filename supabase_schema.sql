@@ -120,5 +120,43 @@ create policy "Users add own workouts" on workouts for insert with check (auth.u
 create policy "Users read own badges" on user_badges for select using (auth.uid() = user_id);
 create policy "Anyone can read community posts" on community_posts for select using (true);
 create policy "Users add own community posts" on community_posts for insert with check (auth.uid() = user_id);
+grant select, update on public.profiles to authenticated;
 grant select on public.community_posts to anon, authenticated;
 grant insert on public.community_posts to authenticated;
+notify pgrst, 'reload schema';
+
+-- Verified workouts and aggregate leaderboards (new verified records only).
+alter table workouts add column if not exists branch_name text;
+alter table workouts add column if not exists city text;
+alter table workouts add column if not exists class_start_at timestamptz;
+alter table workouts add column if not exists verified boolean not null default false;
+alter table workouts add column if not exists distance_meters integer;
+
+create table if not exists search_events (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null check (kind in ('city', 'branch_search')),
+  label text not null,
+  created_at timestamptz not null default now()
+);
+alter table search_events enable row level security;
+drop policy if exists "Anyone can add search events" on search_events;
+create policy "Anyone can add search events" on search_events for insert with check (true);
+grant insert on public.search_events to anon, authenticated;
+
+create or replace function public.leaderboard_stats()
+returns table(kind text, label text, value bigint)
+language sql security definer set search_path = public
+as $$
+  select 'popular_class', class_name, count(*) from workouts where verified group by class_name
+  union all
+  select 'member', coalesce(p.display_name, '運動夥伴'), count(*) from workouts w join profiles p on p.id = w.user_id where w.verified group by p.display_name
+  union all
+  select 'city', label, count(*) from search_events where kind = 'city' group by label
+  union all
+  select 'branch_search', label, count(*) from search_events where kind = 'branch_search' group by label
+  union all
+  select 'branch_complete', branch_name, count(*) from workouts where verified and branch_name is not null group by branch_name
+  union all
+  select 'activity', class_name, count(*) from workouts where verified group by class_name;
+$$;
+grant execute on function public.leaderboard_stats() to anon, authenticated;

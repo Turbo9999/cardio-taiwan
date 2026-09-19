@@ -20,6 +20,8 @@ let socialBranchId = "";
 let branches = [];
 let schedule = [];
 let worldGymBranchSlugs = new Map();
+let worldGymBranchLocations = new Map();
+let savedTasks = JSON.parse(localStorage.getItem("cq_saved_tasks") || "[]");
 
 
 function normalizedBranchName(name){
@@ -436,6 +438,11 @@ function escapeHtml(value){
   return String(value || "").replace(/[&<>'"]/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[character]));
 }
 
+function recordSearch(kind, label){
+  if(!label) return;
+  fetch(`${SUPABASE_URL}/rest/v1/search_events`, { method:"POST", headers:{ ...authHeaders(), "Prefer":"return=minimal" }, body:JSON.stringify({ kind, label }) }).catch(() => {});
+}
+
 async function signOut(){
   try{ if(authSession) await authRequest("logout", { method:"POST", headers:{ "Authorization": `Bearer ${authSession.access_token}` } }); }catch(error){}
   authSession = null; currentUser = null; profileName = "";
@@ -609,6 +616,10 @@ async function loadWorldGymBranchSlugs(){
           ]
         )
       );
+
+    worldGymBranchLocations = new Map(
+      payload.branches.map(branch => [normalizedBranchName(branch.name), { latitude: branch.latitude, longitude: branch.longitude }])
+    );
 
     const expressBranchNames =
       new Set(
@@ -829,6 +840,8 @@ async function changeBranch(
   selectedBranchId =
     branch.id;
 
+  recordSearch("branch_search", branch.name);
+
   selectedBranchName =
     branch.name;
 
@@ -875,6 +888,8 @@ async function changeBranch(
 function changeCity(city){
 
   selectedCity = city;
+
+  if(city) recordSearch("city", city);
 
   localStorage.setItem(
     "cq_city",
@@ -1062,6 +1077,54 @@ async function completeWorkout(name){
 }
 
 
+function saveTask(c){
+  if(!selectedBranchId || !selectedDate) return toast("請先選好分店與日期");
+  const task = { id:`${selectedBranchId}|${selectedDate}|${c.time}|${c.name}`, branchId:selectedBranchId, branchName:selectedBranchName, city:selectedCity, date:selectedDate, ...c };
+  if(!savedTasks.some(item => item.id === task.id)) savedTasks.push(task);
+  localStorage.setItem("cq_saved_tasks", JSON.stringify(savedTasks));
+  toast("已加入我的任務");
+  render("home");
+}
+
+function distanceMeters(aLat, aLng, bLat, bLng){
+  const rad = value => value * Math.PI / 180;
+  const dLat = rad(bLat - aLat), dLng = rad(bLng - aLng);
+  const h = Math.sin(dLat/2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLng/2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h));
+}
+
+function requestCurrentPosition(){
+  return new Promise((resolve, reject) => {
+    if(!navigator.geolocation) return reject(new Error("此裝置不支援定位"));
+    navigator.geolocation.getCurrentPosition(resolve, error => reject(new Error(error.code === 1 ? "請允許定位權限後再驗證" : "目前無法取得定位")), { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
+  });
+}
+
+async function completeWorkout(c){
+  if(!currentUser) return toast("請先使用 Google 登入");
+  if(!selectedBranchId || !selectedDate) return toast("請從課表選擇要完成的課程");
+  const start = new Date(`${selectedDate}T${c.time}:00`);
+  const end = new Date(`${selectedDate}T${c.end || c.time}:00`);
+  const now = new Date();
+  if(Number.isNaN(start.getTime()) || now < new Date(start.getTime() - 3600000) || now > new Date(end.getTime() + 3600000)) return toast("僅能在開課前 1 小時至下課後 1 小時內驗證");
+  const branchLocation = worldGymBranchLocations.get(normalizedBranchName(selectedBranchName));
+  if(!branchLocation?.latitude || !branchLocation?.longitude) return toast("此分店定位資料載入中，請稍後再試");
+  try{
+    toast("正在驗證你是否在分店 150 公尺內…");
+    const position = await requestCurrentPosition();
+    const meters = distanceMeters(position.coords.latitude, position.coords.longitude, branchLocation.latitude, branchLocation.longitude);
+    if(meters > 150) return toast(`距離分店約 ${Math.round(meters)} 公尺，需在 150 公尺內`);
+    xp += 300; completed += 1; streak = Math.max(streak, 1);
+    localStorage.setItem("cq_xp", xp); localStorage.setItem("cq_completed", completed); localStorage.setItem("cq_streak", streak);
+    await saveCloudProfile();
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/workouts`, { method:"POST", headers:{ ...authHeaders(), "Prefer":"return=minimal" }, body:JSON.stringify({ user_id:currentUser.id, class_name:c.name, xp_awarded:300, branch_name:selectedBranchName, city:selectedCity, class_start_at:start.toISOString(), verified:true, distance_meters:Math.round(meters) }) });
+    if(!response.ok) throw new Error("完成紀錄同步失敗");
+    savedTasks = savedTasks.filter(task => !(task.branchId === selectedBranchId && task.date === selectedDate && task.time === c.time && task.name === c.name));
+    localStorage.setItem("cq_saved_tasks", JSON.stringify(savedTasks));
+    toast(`🎉 ${c.name} 已驗證完成！ +300 XP`); render("home");
+  }catch(error){ toast(`⚠️ ${error.message}`); }
+}
+
 // ========================================
 // 導覽
 // ========================================
@@ -1148,7 +1211,7 @@ function render(
   }
 
   if(tab === "social"){
-    social();
+    leaderboard();
   }
 
   if(tab === "profile"){
@@ -1268,6 +1331,8 @@ function home(){
           找今天的課
         </button>
 
+        ${savedTasks.length ? `<div class="saved-task-list">${savedTasks.slice(0,3).map(task => `<div class="saved-task"><b>${escapeHtml(task.name)}</b><span>${escapeHtml(task.branchName)} · ${task.date} ${task.time}</span></div>`).join("")}</div>` : ""}
+
       </div>
 
     </section>
@@ -1363,12 +1428,10 @@ function card(c){
         </div>
 
 
-        <button
-          class="ghost"
-          onclick='completeWorkout(${JSON.stringify(c.name)})'
-        >
-          完成
-        </button>
+        <div class="card-actions">
+          <button class="ghost" onclick='saveTask(${JSON.stringify(c)})'>加入任務</button>
+          <button class="primary" onclick='completeWorkout(${JSON.stringify(c)})'>驗證完成</button>
+        </div>
 
       </div>
 
@@ -2191,6 +2254,21 @@ async function submitCommunityPost(event){
   finally{ button.disabled = false; }
 }
 
+
+async function leaderboard(){
+  content.innerHTML = `<section class="section"><div class="section-title"><h3>🏆 排行榜</h3><span>已驗證完成與查詢熱度</span></div><div id="leaderboards" class="muted">載入排行榜中…</div></section>`;
+  const target = document.querySelector("#leaderboards");
+  try{
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/leaderboard_stats`, { method:"POST", headers:authHeaders(), body:"{}" });
+    if(!response.ok) throw new Error("排行榜載入失敗");
+    const rows = await response.json();
+    const titles = { popular_class:"🔥 熱門有氧課", member:"👤 人員完成度", city:"🗺️ 地區查詢", branch_search:"📍 分店查詢", branch_complete:"🏢 分店課程完成", activity:"💪 運動項目完成" };
+    target.innerHTML = Object.entries(titles).map(([kind, title]) => {
+      const items = rows.filter(row => row.kind === kind).slice(0,5);
+      return `<section class="quest leaderboard"><h3>${title}</h3>${items.length ? items.map((item,index) => `<div class="rank-row"><b>${index+1}. ${escapeHtml(item.label)}</b><span>${item.value}</span></div>`).join("") : `<div class="muted">尚無已驗證資料</div>`}</section>`;
+    }).join("");
+  }catch(error){ target.innerHTML = `<div class="quest muted">${escapeHtml(error.message)}</div>`; }
+}
 
 // ========================================
 // 個人
