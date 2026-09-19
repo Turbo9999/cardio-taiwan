@@ -14,7 +14,7 @@ async function requireAdmin(req, serviceKey) {
   const profiles = await profileResponse.json().catch(() => []);
   const isConfiguredAdmin = String(user.email || "").toLowerCase() === "pkddqq@gmail.com";
   if (profiles[0]?.is_admin !== true && !isConfiguredAdmin) throw new Error("沒有後台管理權限");
-  return user;
+  return { user, token };
 }
 
 async function rest(serviceKey, path, options = {}) {
@@ -33,14 +33,20 @@ export default async function handler(req, res) {
     const { action, query = "", id } = req.body || {};
     if (action === "members") {
       const term = String(query).trim().slice(0, 40).replace(/[,*()]/g, "");
-      const filter = term ? `&display_name=ilike.*${encodeURIComponent(term)}*` : "";
-      const { response, payload } = await rest(serviceKey, `profiles?select=id,display_name,xp,streak_days,created_at&order=created_at.desc&limit=100${filter}`, { headers: { Prefer: "count=exact" } });
-      const total = Number(String(response.headers.get("content-range") || "").split("/")[1]) || 0;
-      return res.status(200).json({ total, members: payload || [] });
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/admin_members`, {
+        method: "POST",
+        headers: { apikey: serviceKey, Authorization: `Bearer ${actor.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ search_term: term })
+      });
+      const payload = await response.json().catch(() => []);
+      if (!response.ok) throw new Error(payload?.message || "無法載入會員資料");
+      const members = payload || [];
+      const total = Number(members[0]?.total || 0);
+      return res.status(200).json({ total, members });
     }
     if (action === "delete_member") {
       if (!/^[0-9a-f-]{36}$/i.test(String(id || ""))) throw new Error("會員識別碼不正確");
-      if (id === actor.id) throw new Error("不能移除目前登入的管理員");
+      if (id === actor.user.id) throw new Error("不能移除目前登入的管理員");
       const deletion = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${id}`, { method: "DELETE", headers: serviceHeaders(serviceKey) });
       if (!deletion.ok) throw new Error("無法移除會員帳號");
       await Promise.all([rest(serviceKey, `profiles?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" }), rest(serviceKey, `workouts?user_id=eq.${encodeURIComponent(id)}`, { method: "DELETE" }), rest(serviceKey, `user_badges?user_id=eq.${encodeURIComponent(id)}`, { method: "DELETE" })]);
