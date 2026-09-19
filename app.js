@@ -1188,11 +1188,22 @@ function completeSavedTask(index){
 
 function bilingualCourseName(name){
   const pairs = [
+    // World Gym's public Chinese course names. Keep longer names first so
+    // Yoga Ball, Yoga Basic, etc. never fall through to the generic Yoga rule.
+    ["TOTAL BODY SCULPT", "全方位雕塑"], ["AEROBICS INTRO", "適能有氧肌力"],
+    ["FAT BURNING", "燃脂訓練"], ["STEP MOVE", "階梯有氧"], ["STEP INTRO", "入門階梯"],
+    ["INTERVAL", "間歇有氧"], ["CYCLING INTRO", "基礎訓練"], ["YOGA BALL", "瑜珈球"],
+    ["YOGA BASIC", "瑜伽基礎"], ["HATHA YOGA", "哈達瑜珈"], ["GENTLE YOGA", "和緩瑜珈"],
+    ["RESTORATIVE YOGA", "修復瑜珈"], ["STRETCH YOGA", "瑜伽伸展"], ["FLOW YOGA", "動瑜珈"],
+    ["ALIGNMENT YOGA", "正位瑜珈"], ["YIN YOGA", "陰瑜珈"], ["LEAN FLOW", "體塑流動"],
+    ["YO YO STRETCH", "悠遊延展"], ["WORLD BALL", "世界猩球"], ["DOUBLE POP", "派對雙響炮"],
+    ["DANCE PARTY", "熱舞派對"], ["MV DANCE", "MV舞蹈"], ["HIP HOP", "流行街舞"],
+    ["BELLY DANCE", "中東肚皮舞"], ["BALLROOM DANCE", "國標舞"], ["HI LOW", "活力有氧"],
+    ["LATIN JAM", "拉丁有氧"], ["DANCE AEROBIC", "舞動有氧"], ["AERO POWER", "動能衝擊"],
+    ["BODY FORGE", "全能雕塑"], ["GROUP RYDER", "酷炫單車"], ["STEPFORCE", "踏動原力"],
     ["BODYCOMBAT", "有氧格鬥"], ["BODYPUMP", "槓鈴肌力"], ["BODYBALANCE", "身心靈平衡"],
-    ["BODYATTACK", "有氧體能"], ["BODYJAM", "舞蹈有氧"], ["RPM", "飛輪"],
-    ["SPRINT", "高強度飛輪"], ["FAT BURNING", "燃脂訓練"], ["GENTLE YOGA", "輕柔瑜伽"],
-    ["BELLY DANCE", "肚皮舞"], ["GROUP CENTERGY", "核心平衡"], ["INDOOR CYCLING", "飛輪"],
-    ["YOGA", "瑜伽"], ["PILATES", "皮拉提斯"], ["ZUMBA", "拉丁有氧"]
+    ["BODYATTACK", "有氧體能"], ["BODYJAM", "舞蹈有氧"], ["PILATES", "皮拉提斯"],
+    ["ZUMBA", "拉丁有氧"], ["RPM", "飛輪"], ["SPRINT", "高強度飛輪"]
   ];
   const original = String(name || "").trim();
   const found = pairs.find(([english, chinese]) => original.toUpperCase().includes(english) || original.includes(chinese));
