@@ -577,6 +577,10 @@ async function loadBranches(){
       params
     );
 
+  // Supabase has an older duplicate record for the same Taipei Tonling club.
+  // Keep the official current name「台北統領店」only.
+  branches = branches.filter(branch => branch.name !== "台北統領");
+
 
   if(!branches.length){
 
@@ -1520,28 +1524,14 @@ function classes(){
   // 分店選單：依縣市分組
   // ======================================
 
+  // 北部 → 中部 → 南部 → 東部 → 離島。
+  // Keep both 台／臺 spelling variants because historic branch records use both.
   const cityOrder = [
-
-    "基隆市",
-    "臺北市",
-    "新北市",
-    "桃園市",
-    "新竹市",
-    "新竹縣",
-    "苗栗縣",
-    "臺中市",
-    "彰化縣",
-    "南投縣",
-    "雲林縣",
-    "嘉義市",
-    "嘉義縣",
-    "臺南市",
-    "高雄市",
-    "屏東縣",
-    "宜蘭縣",
-    "花蓮縣",
-    "臺東縣"
-
+    "基隆市", "台北市", "臺北市", "新北市", "桃園市", "新竹市", "新竹縣", "苗栗縣",
+    "台中市", "臺中市", "彰化縣", "南投縣", "雲林縣",
+    "嘉義市", "嘉義縣", "台南市", "臺南市", "高雄市", "屏東縣",
+    "宜蘭縣", "花蓮縣", "台東縣", "臺東縣",
+    "澎湖縣", "金門縣", "連江縣"
   ];
 
 
