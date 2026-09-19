@@ -8,7 +8,7 @@ let authSession = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
 let currentUser = null;
 let profileName = "";
 let isAdmin = false;
-let themeColor = localStorage.getItem("cq_theme_color") || "black";
+let themeColor = localStorage.getItem("cq_theme_color") || "white";
 let socialCity = "";
 let socialBranchId = "";
 
@@ -225,6 +225,8 @@ function injectScheduleStyles(){
       color:var(--text);
       padding:0 14px;
       font-size:16px;
+      text-align:left;
+      -webkit-text-align:left;
       outline:none;
     }
 
@@ -242,6 +244,8 @@ function injectScheduleStyles(){
 
     .schedule-date-input{
       color-scheme:var(--date-scheme, dark);
+      text-align:left;
+      -webkit-text-align:left;
     }
 
     .schedule-empty{
@@ -364,7 +368,7 @@ async function loadCloudProfile(){
   const rows = await response.json();
   if(rows[0]){
     profileName = rows[0].display_name || "";
-    themeColor = rows[0].theme_color || themeColor;
+    themeColor = ["white", "black", "navy", "gray"].includes(rows[0].theme_color) ? rows[0].theme_color : "white";
     xp = Number(rows[0].xp || 0);
     streak = Number(rows[0].streak_days || 0);
     isAdmin = rows[0].is_admin === true;
