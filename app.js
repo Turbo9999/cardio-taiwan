@@ -409,8 +409,10 @@ function applyTheme(color, persist = true){
     navy:{ "--bg":"#071525", "--panel":"#0d2036", "--panel2":"#122b46", "--line":"#244260", "--text":"#eef7ff", "--muted":"#9ab2c9", "--accent":"#39b9ff", "--accent2":"#6c7dff", "--green":"#48d6a2", "--yellow":"#ffd36a", "--topbar":"rgba(7,21,37,.91)", "--hero-a":"#122d4b", "--hero-b":"#0b1b30", "--glow":"rgba(57,185,255,.22)", "--stat":"rgba(255,255,255,.055)", "--pill-bg":"rgba(57,185,255,.14)", "--pill-text":"#8bd6ff", "--progress":"#193650", "--primary2":"#6484ff", "--mini":"#193a59", "--link":"#8bd6ff", "--toast-bg":"#eaf6ff", "--toast-text":"#102235" },
     gray:{ "--bg":"#282b31", "--panel":"#343840", "--panel2":"#41464f", "--line":"#575e69", "--text":"#f4f5f7", "--muted":"#b6bbc4", "--accent":"#ffc857", "--accent2":"#ed8f55", "--green":"#67d9a5", "--yellow":"#ffd773", "--topbar":"rgba(40,43,49,.92)", "--hero-a":"#414650", "--hero-b":"#30343b", "--glow":"rgba(255,200,87,.18)", "--stat":"rgba(255,255,255,.06)", "--pill-bg":"rgba(255,200,87,.14)", "--pill-text":"#ffe09a", "--progress":"#4a505a", "--primary2":"#ee9b61", "--mini":"#505762", "--link":"#ffd98a", "--toast-bg":"#f4f5f7", "--toast-text":"#24272d" }
   };
+  const navBackgrounds = { white:"rgba(255,255,255,.94)", black:"rgba(12,15,21,.94)", navy:"rgba(7,21,37,.94)", gray:"rgba(40,43,49,.94)" };
   themeColor = themes[color] ? color : "black";
   Object.entries(themes[themeColor]).forEach(([name, value]) => document.documentElement.style.setProperty(name, value));
+  document.documentElement.style.setProperty("--nav-bg", navBackgrounds[themeColor]);
   if(persist) localStorage.setItem("cq_theme_color", themeColor);
 }
 
