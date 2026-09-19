@@ -210,7 +210,7 @@ function injectScheduleStyles(){
       min-width:72px;
       font-size:17px;
       font-weight:700;
-      color:#f3f4f6;
+      color:var(--text);
       line-height:1;
     }
 
@@ -219,17 +219,17 @@ function injectScheduleStyles(){
       min-width:0;
       height:52px;
       box-sizing:border-box;
-      border:1px solid #293242;
+      border:1px solid var(--line);
       border-radius:16px;
-      background:#121720;
-      color:#f5f7fb;
+      background:var(--panel);
+      color:var(--text);
       padding:0 14px;
       font-size:16px;
       outline:none;
     }
 
     .schedule-control-input:focus{
-      border-color:#e94f9b;
+      border-color:var(--accent);
       box-shadow:
         0 0 0 2px
         rgba(233,79,155,.12);
@@ -241,22 +241,22 @@ function injectScheduleStyles(){
     }
 
     .schedule-date-input{
-      color-scheme:dark;
+      color-scheme:var(--date-scheme, dark);
     }
 
     .schedule-empty{
       padding:32px 18px;
       text-align:center;
-      border:1px dashed #303847;
+      border:1px dashed var(--line);
       border-radius:18px;
-      color:#9ca3af;
-      background:#11161e;
+      color:var(--muted);
+      background:var(--panel);
     }
 
     .schedule-loading{
       padding:30px 18px;
       text-align:center;
-      color:#a8afbd;
+      color:var(--muted);
     }
 
     .schedule-heading{
@@ -272,7 +272,7 @@ function injectScheduleStyles(){
     }
 
     .schedule-heading-date{
-      color:#929aaa;
+      color:var(--muted);
       font-size:14px;
       white-space:nowrap;
     }
@@ -280,9 +280,9 @@ function injectScheduleStyles(){
     .schedule-notice{
       padding:18px;
       border-radius:16px;
-      background:#11161e;
-      border:1px solid #293242;
-      color:#aeb5c2;
+      background:var(--panel);
+      border:1px solid var(--line);
+      color:var(--muted);
       text-align:center;
     }
 
@@ -404,10 +404,10 @@ function signInWithGoogle(){
 
 function applyTheme(color, persist = true){
   const themes = {
-    white:{ "--bg":"#f4f6fa", "--panel":"#ffffff", "--panel2":"#edf1f7", "--line":"#d6dde8", "--text":"#172033", "--muted":"#5d6b80", "--accent":"#d94669", "--accent2":"#6d5ce8", "--green":"#087d57", "--yellow":"#a85b00", "--topbar":"rgba(244,246,250,.92)", "--hero-a":"#ffffff", "--hero-b":"#eaf0f8", "--glow":"rgba(217,70,105,.18)", "--stat":"rgba(23,32,51,.045)", "--pill-bg":"rgba(217,70,105,.12)", "--pill-text":"#b42450", "--progress":"#dbe3ee", "--primary2":"#ef6b8e", "--mini":"#dce5f1", "--link":"#4264c7", "--toast-bg":"#172033", "--toast-text":"#ffffff" },
-    black:{ "--bg":"#090b10", "--panel":"#12161e", "--panel2":"#181e28", "--line":"#29313d", "--text":"#f4f7fb", "--muted":"#9da7b5", "--accent":"#ff4f86", "--accent2":"#8b7cff", "--green":"#39d98a", "--yellow":"#ffd166", "--topbar":"rgba(9,11,16,.9)", "--hero-a":"#171b27", "--hero-b":"#11151d", "--glow":"rgba(255,79,134,.25)", "--stat":"rgba(255,255,255,.04)", "--pill-bg":"rgba(255,79,134,.12)", "--pill-text":"#ff8eaf", "--progress":"#252b35", "--primary2":"#ff6aa0", "--mini":"#272e3a", "--link":"#9eb7ff", "--toast-bg":"#eef2f7", "--toast-text":"#111111" },
-    navy:{ "--bg":"#071525", "--panel":"#0d2036", "--panel2":"#122b46", "--line":"#244260", "--text":"#eef7ff", "--muted":"#9ab2c9", "--accent":"#39b9ff", "--accent2":"#6c7dff", "--green":"#48d6a2", "--yellow":"#ffd36a", "--topbar":"rgba(7,21,37,.91)", "--hero-a":"#122d4b", "--hero-b":"#0b1b30", "--glow":"rgba(57,185,255,.22)", "--stat":"rgba(255,255,255,.055)", "--pill-bg":"rgba(57,185,255,.14)", "--pill-text":"#8bd6ff", "--progress":"#193650", "--primary2":"#6484ff", "--mini":"#193a59", "--link":"#8bd6ff", "--toast-bg":"#eaf6ff", "--toast-text":"#102235" },
-    gray:{ "--bg":"#282b31", "--panel":"#343840", "--panel2":"#41464f", "--line":"#575e69", "--text":"#f4f5f7", "--muted":"#b6bbc4", "--accent":"#ffc857", "--accent2":"#ed8f55", "--green":"#67d9a5", "--yellow":"#ffd773", "--topbar":"rgba(40,43,49,.92)", "--hero-a":"#414650", "--hero-b":"#30343b", "--glow":"rgba(255,200,87,.18)", "--stat":"rgba(255,255,255,.06)", "--pill-bg":"rgba(255,200,87,.14)", "--pill-text":"#ffe09a", "--progress":"#4a505a", "--primary2":"#ee9b61", "--mini":"#505762", "--link":"#ffd98a", "--toast-bg":"#f4f5f7", "--toast-text":"#24272d" }
+    white:{ "--bg":"#f4f6fa", "--panel":"#ffffff", "--panel2":"#edf1f7", "--line":"#d6dde8", "--text":"#172033", "--muted":"#5d6b80", "--accent":"#d94669", "--accent2":"#6d5ce8", "--green":"#087d57", "--yellow":"#a85b00", "--topbar":"rgba(244,246,250,.92)", "--hero-a":"#ffffff", "--hero-b":"#eaf0f8", "--glow":"rgba(217,70,105,.18)", "--stat":"rgba(23,32,51,.045)", "--pill-bg":"rgba(217,70,105,.12)", "--pill-text":"#b42450", "--progress":"#dbe3ee", "--primary2":"#ef6b8e", "--mini":"#dce5f1", "--link":"#4264c7", "--toast-bg":"#172033", "--toast-text":"#ffffff", "--date-scheme":"light" },
+    black:{ "--bg":"#090b10", "--panel":"#12161e", "--panel2":"#181e28", "--line":"#29313d", "--text":"#f4f7fb", "--muted":"#9da7b5", "--accent":"#ff4f86", "--accent2":"#8b7cff", "--green":"#39d98a", "--yellow":"#ffd166", "--topbar":"rgba(9,11,16,.9)", "--hero-a":"#171b27", "--hero-b":"#11151d", "--glow":"rgba(255,79,134,.25)", "--stat":"rgba(255,255,255,.04)", "--pill-bg":"rgba(255,79,134,.12)", "--pill-text":"#ff8eaf", "--progress":"#252b35", "--primary2":"#ff6aa0", "--mini":"#272e3a", "--link":"#9eb7ff", "--toast-bg":"#eef2f7", "--toast-text":"#111111", "--date-scheme":"dark" },
+    navy:{ "--bg":"#071525", "--panel":"#0d2036", "--panel2":"#122b46", "--line":"#244260", "--text":"#eef7ff", "--muted":"#9ab2c9", "--accent":"#39b9ff", "--accent2":"#6c7dff", "--green":"#48d6a2", "--yellow":"#ffd36a", "--topbar":"rgba(7,21,37,.91)", "--hero-a":"#122d4b", "--hero-b":"#0b1b30", "--glow":"rgba(57,185,255,.22)", "--stat":"rgba(255,255,255,.055)", "--pill-bg":"rgba(57,185,255,.14)", "--pill-text":"#8bd6ff", "--progress":"#193650", "--primary2":"#6484ff", "--mini":"#193a59", "--link":"#8bd6ff", "--toast-bg":"#eaf6ff", "--toast-text":"#102235", "--date-scheme":"dark" },
+    gray:{ "--bg":"#282b31", "--panel":"#343840", "--panel2":"#41464f", "--line":"#575e69", "--text":"#f4f5f7", "--muted":"#b6bbc4", "--accent":"#ffc857", "--accent2":"#ed8f55", "--green":"#67d9a5", "--yellow":"#ffd773", "--topbar":"rgba(40,43,49,.92)", "--hero-a":"#414650", "--hero-b":"#30343b", "--glow":"rgba(255,200,87,.18)", "--stat":"rgba(255,255,255,.06)", "--pill-bg":"rgba(255,200,87,.14)", "--pill-text":"#ffe09a", "--progress":"#4a505a", "--primary2":"#ee9b61", "--mini":"#505762", "--link":"#ffd98a", "--toast-bg":"#f4f5f7", "--toast-text":"#24272d", "--date-scheme":"dark" }
   };
   const navBackgrounds = { white:"rgba(255,255,255,.94)", black:"rgba(12,15,21,.94)", navy:"rgba(7,21,37,.94)", gray:"rgba(40,43,49,.94)" };
   themeColor = themes[color] ? color : "black";
@@ -1725,53 +1725,6 @@ function classes(){
 
           : `
 
-            <input
-              class="search"
-              id="q"
-              placeholder="搜尋課程，例如 BODYCOMBAT、瑜伽、飛輪"
-            >
-
-
-            <div class="filterbar">
-
-              <button
-                class="ghost"
-                data-filter="all"
-              >
-                全部
-              </button>
-
-              <button
-                class="ghost"
-                data-filter="Les Mills"
-              >
-                Les Mills
-              </button>
-
-              <button
-                class="ghost"
-                data-filter="MOSSA"
-              >
-                MOSSA
-              </button>
-
-              <button
-                class="ghost"
-                data-filter="飛輪心率"
-              >
-                飛輪
-              </button>
-
-              <button
-                class="ghost"
-                data-filter="心肺肌力訓練"
-              >
-                有氧
-              </button>
-
-            </div>
-
-
             <section class="section">
 
               <div class="schedule-heading">
@@ -1978,57 +1931,6 @@ function classes(){
 
   }
 
-
-  // ======================================
-  // 搜尋
-  // ======================================
-
-  const search =
-    document.querySelector(
-      "#q"
-    );
-
-
-  if(search){
-
-    search.addEventListener(
-      "input",
-      event => {
-
-        filterClasses(
-          event.target.value
-        );
-
-      }
-    );
-
-  }
-
-
-  // ======================================
-  // 分類
-  // ======================================
-
-  document
-    .querySelectorAll(
-      "[data-filter]"
-    )
-    .forEach(
-      button => {
-
-        button.addEventListener(
-          "click",
-          () => {
-
-            filterClasses(
-              button.dataset.filter
-            );
-
-          }
-        );
-
-      }
-    );
 
 }
 
