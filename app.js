@@ -1190,10 +1190,13 @@ function bilingualCourseName(name){
   const pairs = [
     ["BODYCOMBAT", "有氧格鬥"], ["BODYPUMP", "槓鈴肌力"], ["BODYBALANCE", "身心靈平衡"],
     ["BODYATTACK", "有氧體能"], ["BODYJAM", "舞蹈有氧"], ["RPM", "飛輪"],
-    ["SPRINT", "高強度飛輪"], ["瑜伽", "Yoga"], ["皮拉提斯", "Pilates"], ["飛輪", "Indoor Cycling"]
+    ["SPRINT", "高強度飛輪"], ["FAT BURNING", "燃脂訓練"], ["GENTLE YOGA", "輕柔瑜伽"],
+    ["BELLY DANCE", "肚皮舞"], ["GROUP CENTERGY", "核心平衡"], ["INDOOR CYCLING", "飛輪"],
+    ["YOGA", "瑜伽"], ["PILATES", "皮拉提斯"], ["ZUMBA", "拉丁有氧"]
   ];
-  const found = pairs.find(([first, second]) => String(name).toUpperCase().includes(first) || String(name).includes(second));
-  return found ? `${name} · ${String(name).toUpperCase().includes(found[0]) ? found[1] : found[0]}` : name;
+  const original = String(name || "").trim();
+  const found = pairs.find(([english, chinese]) => original.toUpperCase().includes(english) || original.includes(chinese));
+  return found ? `${found[1]} · ${found[0]}` : original;
 }
 
 function distanceMeters(aLat, aLng, bLat, bLng){
