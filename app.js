@@ -1476,11 +1476,11 @@ function card(c){
         <div>
 
           <div class="class-time">
-            ${c.time} - ${c.end}
+            ${c.time} - ${c.end}${c.substitute ? "（代）" : ""}
           </div>
 
           <div class="class-name">
-            ${bilingualCourseName(c.name)}${c.substitute ? "（代）" : ""}
+            ${bilingualCourseName(c.name)}
           </div>
 
           <div class="class-meta">
