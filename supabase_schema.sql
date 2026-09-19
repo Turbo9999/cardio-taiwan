@@ -120,3 +120,5 @@ create policy "Users add own workouts" on workouts for insert with check (auth.u
 create policy "Users read own badges" on user_badges for select using (auth.uid() = user_id);
 create policy "Anyone can read community posts" on community_posts for select using (true);
 create policy "Users add own community posts" on community_posts for insert with check (auth.uid() = user_id);
+grant select on public.community_posts to anon, authenticated;
+grant insert on public.community_posts to authenticated;
