@@ -32,6 +32,8 @@ create table if not exists class_schedules (
 create table if not exists profiles (
   id uuid primary key,
   display_name text,
+  instagram_handle text,
+  theme_color text default '#ff4f86',
   xp integer not null default 0,
   streak_days integer not null default 0,
   created_at timestamptz default now()
@@ -62,11 +64,29 @@ create table if not exists user_badges (
   primary key(user_id,badge_id)
 );
 
+-- Community messages keep the public display name and optional Instagram handle
+-- as a snapshot, so other members never need access to private profile rows.
+create table if not exists community_posts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  author_name text not null,
+  author_instagram text,
+  city text not null,
+  branch_name text not null,
+  message text not null check (char_length(message) between 1 and 500),
+  created_at timestamptz not null default now()
+);
+
+-- Safe to run after the original schema has already been applied.
+alter table profiles add column if not exists instagram_handle text;
+alter table profiles add column if not exists theme_color text default '#ff4f86';
+
 -- Account support: run this entire file in the Supabase SQL Editor once.
 -- auth.users is managed by Supabase; this trigger creates a matching profile.
 alter table profiles enable row level security;
 alter table workouts enable row level security;
 alter table user_badges enable row level security;
+alter table community_posts enable row level security;
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -90,9 +110,13 @@ drop policy if exists "Users update own profile" on profiles;
 drop policy if exists "Users read own workouts" on workouts;
 drop policy if exists "Users add own workouts" on workouts;
 drop policy if exists "Users read own badges" on user_badges;
+drop policy if exists "Anyone can read community posts" on community_posts;
+drop policy if exists "Users add own community posts" on community_posts;
 
 create policy "Users read own profile" on profiles for select using (auth.uid() = id);
 create policy "Users update own profile" on profiles for update using (auth.uid() = id);
 create policy "Users read own workouts" on workouts for select using (auth.uid() = user_id);
 create policy "Users add own workouts" on workouts for insert with check (auth.uid() = user_id);
 create policy "Users read own badges" on user_badges for select using (auth.uid() = user_id);
+create policy "Anyone can read community posts" on community_posts for select using (true);
+create policy "Users add own community posts" on community_posts for insert with check (auth.uid() = user_id);

@@ -7,6 +7,10 @@ const AUTH_STORAGE_KEY = "cq_auth_session";
 let authSession = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
 let currentUser = null;
 let profileName = "";
+let instagramHandle = "";
+let themeColor = localStorage.getItem("cq_theme_color") || "#ff4f86";
+let socialCity = "";
+let socialBranchId = "";
 
 
 // ========================================
@@ -346,20 +350,23 @@ async function saveCloudProfile(){
   const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${currentUser.id}`, {
     method: "PATCH",
     headers: { ...authHeaders(), "Prefer": "return=minimal" },
-    body: JSON.stringify({ display_name: profileName || currentUser.email.split("@")[0], xp, streak_days: streak })
+    body: JSON.stringify({ display_name: profileName || currentUser.email.split("@")[0], instagram_handle: instagramHandle || null, theme_color: themeColor, xp, streak_days: streak })
   });
   if(!response.ok) throw new Error("個人資料同步失敗");
 }
 
 async function loadCloudProfile(){
   if(!currentUser || !authSession) return;
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${currentUser.id}&select=display_name,xp,streak_days`, { headers: authHeaders() });
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${currentUser.id}&select=display_name,instagram_handle,theme_color,xp,streak_days`, { headers: authHeaders() });
   if(!response.ok) return;
   const rows = await response.json();
   if(rows[0]){
     profileName = rows[0].display_name || "";
+    instagramHandle = rows[0].instagram_handle || "";
+    themeColor = rows[0].theme_color || themeColor;
     xp = Number(rows[0].xp || 0);
     streak = Number(rows[0].streak_days || 0);
+    applyTheme(themeColor, false);
   }
   const workoutResponse = await fetch(`${SUPABASE_URL}/rest/v1/workouts?user_id=eq.${currentUser.id}&select=id`, { headers: authHeaders() });
   if(workoutResponse.ok) completed = (await workoutResponse.json()).length;
@@ -391,6 +398,42 @@ function consumeAuthCallback(){
 function signInWithGoogle(){
   const redirectTo = encodeURIComponent(window.location.origin);
   window.location.assign(`${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}`);
+}
+
+function applyTheme(color, persist = true){
+  const palette = {
+    "#ff4f86":"#8b7cff", "#7c5cff":"#38bdf8", "#0ea5a4":"#39d98a",
+    "#f59e0b":"#f97316", "#ef4444":"#ec4899"
+  };
+  themeColor = palette[color] ? color : "#ff4f86";
+  document.documentElement.style.setProperty("--accent", themeColor);
+  document.documentElement.style.setProperty("--accent2", palette[themeColor]);
+  if(persist) localStorage.setItem("cq_theme_color", themeColor);
+}
+
+async function updateProfile(event){
+  event.preventDefault();
+  const form = event.currentTarget;
+  const displayName = form.display_name.value.trim().slice(0, 40);
+  const handle = form.instagram.value.trim().replace(/^@/, "");
+  const color = form.theme_color.value;
+  if(!displayName) return toast("請填寫暱稱");
+  if(handle && !/^[a-zA-Z0-9._]{1,30}$/.test(handle)) return toast("IG 帳號格式不正確");
+  const button = form.querySelector("button[type=submit]");
+  button.disabled = true;
+  try{
+    profileName = displayName;
+    instagramHandle = handle;
+    applyTheme(color);
+    await saveCloudProfile();
+    toast("個人資料已儲存");
+    render("profile");
+  }catch(error){ toast(`⚠️ ${error.message}`); }
+  finally{ button.disabled = false; }
+}
+
+function escapeHtml(value){
+  return String(value || "").replace(/[&<>'"]/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[character]));
 }
 
 async function signOut(){
@@ -2074,99 +2117,78 @@ function badgePage(){
 // 社群
 // ========================================
 
-function social(){
-
+async function social(){
+  const cities = [...new Set(branches.map(branch => branch.city).filter(Boolean))];
+  const filteredBranches = branches.filter(branch => !socialCity || branch.city === socialCity);
+  const cityOptions = cities.map(city => `<option value="${escapeHtml(city)}" ${city === socialCity ? "selected" : ""}>${escapeHtml(city)}</option>`).join("");
+  const branchOptions = filteredBranches.map(branch => `<option value="${branch.id}" ${branch.id === socialBranchId ? "selected" : ""}>${escapeHtml(branch.name)}</option>`).join("");
   content.innerHTML = `
-
     <section class="section">
-
-      <div class="section-title">
-
-        <h3>
-          👥 Community
-        </h3>
-
-        <span>
-          附近健身玩家
-        </span>
-
+      <div class="section-title"><h3>👥 社群留言板</h3><span>依地區找運動夥伴</span></div>
+      <div class="quest community-filters">
+        <label>縣市<select onchange="changeSocialCity(this.value)"><option value="">全部縣市</option>${cityOptions}</select></label>
+        <label>分店<select onchange="changeSocialBranch(this.value)"><option value="">全部分店</option>${branchOptions}</select></label>
       </div>
+      ${currentUser ? `
+        <form class="quest community-form" onsubmit="submitCommunityPost(event)">
+          <h3>留下你的留言</h3>
+          <textarea name="message" maxlength="500" required placeholder="分享今天的課程、揪團或運動心得…"></textarea>
+          <button class="primary" type="submit">發布留言</button>
+        </form>` : `
+        <div class="quest"><b>登入後即可留言</b><p class="muted">你可在「我的」頁設定暱稱與 IG，讓留言更容易被認識。</p><button class="ghost" onclick="nav('profile')">前往登入</button></div>`}
+      <div id="communityPosts" class="section"><div class="muted">載入留言中…</div></div>
+    </section>`;
+  await loadCommunityPosts();
+}
 
+function changeSocialCity(city){
+  socialCity = city;
+  socialBranchId = "";
+  social();
+}
 
-      <article class="post">
+function changeSocialBranch(branchId){
+  socialBranchId = branchId;
+  social();
+}
 
-        <div class="post-header">
+async function loadCommunityPosts(){
+  const target = document.querySelector("#communityPosts");
+  if(!target) return;
+  try{
+    const params = new URLSearchParams({ select:"id,author_name,author_instagram,city,branch_name,message,created_at", order:"created_at.desc", limit:"100" });
+    if(socialCity) params.set("city", `eq.${socialCity}`);
+    if(socialBranchId){
+      const branch = branches.find(item => item.id === socialBranchId);
+      if(branch) params.set("branch_name", `eq.${branch.name}`);
+    }
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/community_posts?${params}`, { headers: authHeaders() });
+    if(!response.ok) throw new Error("留言載入失敗");
+    const posts = await response.json();
+    target.innerHTML = posts.length ? posts.map(post => {
+      const name = escapeHtml(post.author_name || "運動夥伴");
+      const handle = String(post.author_instagram || "").replace(/^@/, "");
+      const ig = handle ? `<a class="ig-link" href="https://instagram.com/${encodeURIComponent(handle)}" target="_blank" rel="noopener">@${escapeHtml(handle)}</a>` : "";
+      const time = new Date(post.created_at).toLocaleString("zh-TW", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" });
+      return `<article class="post"><div class="post-header"><div class="mini-avatar">${name.slice(0,1).toUpperCase()}</div><div><b>${name}</b>${ig}<div class="muted">${escapeHtml(post.city || "其他地區")} · ${escapeHtml(post.branch_name || "未指定分店")} · ${time}</div></div></div><p>${escapeHtml(post.message).replace(/\n/g,"<br>")}</p></article>`;
+    }).join("") : `<div class="quest muted">這個地區目前還沒有留言，來當第一位吧！</div>`;
+  }catch(error){ target.innerHTML = `<div class="quest muted">${escapeHtml(error.message)}</div>`; }
+}
 
-          <div class="mini-avatar">
-            K
-          </div>
-
-          <div>
-
-            <b>
-              Kevin
-            </b>
-
-            <div class="muted">
-              剛剛 · 板橋
-            </div>
-
-          </div>
-
-        </div>
-
-
-        <p>
-          🥊 今天完成 BODYCOMBAT®！
-          又多一個 XP。
-        </p>
-
-
-        <div class="actions">
-          ♡ 18　💬 3　🏅 Combat Rookie
-        </div>
-
-      </article>
-
-
-      <article class="post">
-
-        <div class="post-header">
-
-          <div class="mini-avatar">
-            A
-          </div>
-
-          <div>
-
-            <b>
-              Alex
-            </b>
-
-            <div class="muted">
-              1 小時前 · 新北
-            </div>
-
-          </div>
-
-        </div>
-
-
-        <p>
-          🔥 連續運動 7 天，今天繼續。
-        </p>
-
-
-        <div class="actions">
-          ♡ 12　💬 1　🔥 7 DAY STREAK
-        </div>
-
-      </article>
-
-    </section>
-
-  `;
-
+async function submitCommunityPost(event){
+  event.preventDefault();
+  const message = event.currentTarget.message.value.trim();
+  const branch = branches.find(item => item.id === socialBranchId);
+  if(!socialCity || !branch) return toast("請先選擇縣市與分店再留言");
+  const button = event.currentTarget.querySelector("button[type=submit]");
+  button.disabled = true;
+  try{
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/community_posts`, { method:"POST", headers:{ ...authHeaders(), "Prefer":"return=minimal" }, body:JSON.stringify({ user_id:currentUser.id, author_name:profileName || currentUser.email.split("@")[0], author_instagram:instagramHandle || null, city:socialCity, branch_name:branch.name, message }) });
+    if(!response.ok) throw new Error("留言發布失敗");
+    toast("留言已發布");
+    social();
+  }catch(error){ toast(`⚠️ ${error.message}`); }
+  finally{ button.disabled = false; }
 }
 
 
@@ -2256,6 +2278,22 @@ function profile(){
     </section>
 
     <section class="section">
+      <form class="quest profile-settings" onsubmit="updateProfile(event)">
+        <div class="section-title"><h3>⚙️ 個人設定</h3><span>公開在社群留言</span></div>
+        <label>暱稱<input name="display_name" maxlength="40" required value="${escapeHtml(profileName || currentUser.email.split("@")[0])}"></label>
+        <label>Instagram 帳號（選填）<input name="instagram" maxlength="30" autocomplete="off" placeholder="例如 cardio_taiwan" value="${escapeHtml(instagramHandle)}"></label>
+        <label>介面主色<select name="theme_color">
+          <option value="#ff4f86" ${themeColor === "#ff4f86" ? "selected" : ""}>桃紅</option>
+          <option value="#7c5cff" ${themeColor === "#7c5cff" ? "selected" : ""}>紫藍</option>
+          <option value="#0ea5a4" ${themeColor === "#0ea5a4" ? "selected" : ""}>湖水綠</option>
+          <option value="#f59e0b" ${themeColor === "#f59e0b" ? "selected" : ""}>橘色</option>
+          <option value="#ef4444" ${themeColor === "#ef4444" ? "selected" : ""}>紅色</option>
+        </select></label>
+        <button class="primary" type="submit">儲存個人設定</button>
+      </form>
+    </section>
+
+    <section class="section">
       <button class="ghost" onclick="signOut()">登出帳號</button>
     </section>
 
@@ -2320,6 +2358,7 @@ async function init(){
   try{
 
     injectScheduleStyles();
+    applyTheme(themeColor, false);
 
     // Google OAuth 完成後會把工作階段放在網址雜湊中；取用後立刻清除網址。
     consumeAuthCallback();
