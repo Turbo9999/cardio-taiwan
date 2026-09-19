@@ -80,6 +80,7 @@ create table if not exists community_posts (
 -- Safe to run after the original schema has already been applied.
 alter table profiles add column if not exists instagram_handle text;
 alter table profiles add column if not exists theme_color text default '#ff4f86';
+alter table profiles add column if not exists is_admin boolean not null default false;
 
 -- Account support: run this entire file in the Supabase SQL Editor once.
 -- auth.users is managed by Supabase; this trigger creates a matching profile.
@@ -160,3 +161,11 @@ as $$
   select 'activity', class_name, count(*) from workouts where verified group by class_name;
 $$;
 grant execute on function public.leaderboard_stats() to anon, authenticated;
+
+-- Admin access. The application checks this field on the server, never in the browser alone.
+-- This statement grants the initial administrator requested for this project.
+update public.profiles p
+set is_admin = true
+from auth.users u
+where p.id = u.id
+  and lower(u.email) = lower('pkddqq@gmail.com');

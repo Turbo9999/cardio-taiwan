@@ -7,7 +7,7 @@ const AUTH_STORAGE_KEY = "cq_auth_session";
 let authSession = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
 let currentUser = null;
 let profileName = "";
-let instagramHandle = "";
+let isAdmin = false;
 let themeColor = localStorage.getItem("cq_theme_color") || "#ff4f86";
 let socialCity = "";
 let socialBranchId = "";
@@ -352,22 +352,22 @@ async function saveCloudProfile(){
   const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${currentUser.id}`, {
     method: "PATCH",
     headers: { ...authHeaders(), "Prefer": "return=minimal" },
-    body: JSON.stringify({ display_name: profileName || currentUser.email.split("@")[0], instagram_handle: instagramHandle || null, theme_color: themeColor, xp, streak_days: streak })
+    body: JSON.stringify({ display_name: profileName || currentUser.email.split("@")[0], theme_color: themeColor, xp, streak_days: streak })
   });
   if(!response.ok) throw new Error("個人資料同步失敗");
 }
 
 async function loadCloudProfile(){
   if(!currentUser || !authSession) return;
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${currentUser.id}&select=display_name,instagram_handle,theme_color,xp,streak_days`, { headers: authHeaders() });
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${currentUser.id}&select=display_name,theme_color,xp,streak_days,is_admin`, { headers: authHeaders() });
   if(!response.ok) return;
   const rows = await response.json();
   if(rows[0]){
     profileName = rows[0].display_name || "";
-    instagramHandle = rows[0].instagram_handle || "";
     themeColor = rows[0].theme_color || themeColor;
     xp = Number(rows[0].xp || 0);
     streak = Number(rows[0].streak_days || 0);
+    isAdmin = rows[0].is_admin === true;
     applyTheme(themeColor, false);
   }
   const workoutResponse = await fetch(`${SUPABASE_URL}/rest/v1/workouts?user_id=eq.${currentUser.id}&select=id`, { headers: authHeaders() });
@@ -413,21 +413,26 @@ function applyTheme(color, persist = true){
   if(persist) localStorage.setItem("cq_theme_color", themeColor);
 }
 
+function syncAvatar(){
+  const avatar = document.querySelector("#avatar");
+  if(!avatar) return;
+  const label = (profileName || currentUser?.email || "T").trim();
+  avatar.textContent = (label.slice(0, 1) || "T").toUpperCase();
+}
+
 async function updateProfile(event){
   event.preventDefault();
   const form = event.currentTarget;
   const displayName = form.display_name.value.trim().slice(0, 40);
-  const handle = form.instagram.value.trim().replace(/^@/, "");
   const color = form.theme_color.value;
   if(!displayName) return toast("請填寫暱稱");
-  if(handle && !/^[a-zA-Z0-9._]{1,30}$/.test(handle)) return toast("IG 帳號格式不正確");
   const button = form.querySelector("button[type=submit]");
   button.disabled = true;
   try{
     profileName = displayName;
-    instagramHandle = handle;
     applyTheme(color);
     await saveCloudProfile();
+    syncAvatar();
     toast("個人資料已儲存");
     render("profile");
   }catch(error){ toast(`⚠️ ${error.message}`); }
@@ -445,7 +450,7 @@ function recordSearch(kind, label){
 
 async function signOut(){
   try{ if(authSession) await authRequest("logout", { method:"POST", headers:{ "Authorization": `Bearer ${authSession.access_token}` } }); }catch(error){}
-  authSession = null; currentUser = null; profileName = "";
+  authSession = null; currentUser = null; profileName = ""; isAdmin = false;
   localStorage.removeItem(AUTH_STORAGE_KEY);
   toast("已登出");
   render("profile");
@@ -1083,7 +1088,7 @@ function saveTask(c){
   if(!savedTasks.some(item => item.id === task.id)) savedTasks.push(task);
   localStorage.setItem("cq_saved_tasks", JSON.stringify(savedTasks));
   toast("已加入我的任務");
-  render("home");
+  nav("home");
 }
 
 function taskExpired(task){
@@ -1092,18 +1097,34 @@ function taskExpired(task){
 }
 
 function bindTaskSwipe(){
-  document.querySelectorAll(".saved-task[data-task-index]").forEach(element => {
+  document.querySelectorAll(".task-swipe[data-task-index]").forEach(wrapper => {
     let startX = 0;
-    element.addEventListener("touchstart", event => { startX = event.touches[0].clientX; }, { passive:true });
+    let offset = 0;
+    const element = wrapper.querySelector(".saved-task");
+    wrapper.addEventListener("touchstart", event => { startX = event.touches[0].clientX; offset = wrapper.classList.contains("swiped") ? -104 : 0; }, { passive:true });
+    wrapper.addEventListener("touchmove", event => {
+      const difference = Math.min(0, Math.max(-104, offset + event.touches[0].clientX - startX));
+      element.style.transform = `translateX(${difference}px)`;
+    }, { passive:true });
     element.addEventListener("touchend", event => {
-      if(event.changedTouches[0].clientX - startX > -70) return;
-      const index = Number(element.dataset.taskIndex);
-      savedTasks.splice(index, 1);
-      localStorage.setItem("cq_saved_tasks", JSON.stringify(savedTasks));
-      toast("任務已移除");
-      render("home");
+      const difference = event.changedTouches[0].clientX - startX;
+      element.style.transform = "";
+      wrapper.classList.toggle("swiped", difference < -55 || (offset && difference < 35));
     }, { passive:true });
   });
+}
+
+function removeTask(index){
+  savedTasks.splice(index, 1);
+  localStorage.setItem("cq_saved_tasks", JSON.stringify(savedTasks));
+  toast("任務已移除");
+  render("home");
+}
+
+function completeSavedTask(index){
+  const task = savedTasks[index];
+  if(!task) return;
+  completeWorkout(task, task);
 }
 
 function bilingualCourseName(name){
@@ -1130,26 +1151,27 @@ function requestCurrentPosition(){
   });
 }
 
-async function completeWorkout(c){
+async function completeWorkout(c, taskContext = null){
   if(!currentUser) return toast("請先使用 Google 登入");
-  if(!selectedBranchId || !selectedDate) return toast("請從課表選擇要完成的課程");
-  const start = new Date(`${selectedDate}T${c.time}:00`);
-  const end = new Date(`${selectedDate}T${c.end || c.time}:00`);
+  const context = taskContext || { branchId:selectedBranchId, branchName:selectedBranchName, city:selectedCity, date:selectedDate };
+  if(!context.branchId || !context.date) return toast("請從課表選擇要完成的課程");
+  const start = new Date(`${context.date}T${c.time}:00`);
   const now = new Date();
-  if(Number.isNaN(start.getTime()) || now < new Date(start.getTime() - 3600000) || now > new Date(end.getTime() + 3600000)) return toast("僅能在開課前 1 小時至下課後 1 小時內驗證");
-  const branchLocation = worldGymBranchLocations.get(normalizedBranchName(selectedBranchName));
+  if(Number.isNaN(start.getTime()) || now < start) return toast("不能完成任務的原因：尚未開課");
+  if(now > new Date(start.getTime() + 3600000)) return toast("不能完成任務的原因：已超過開課後 1 小時");
+  const branchLocation = worldGymBranchLocations.get(normalizedBranchName(context.branchName));
   if(!branchLocation?.latitude || !branchLocation?.longitude) return toast("此分店定位資料載入中，請稍後再試");
   try{
-    toast("正在驗證你是否在分店 150 公尺內…");
+    toast("正在驗證你是否在分店 200 公尺內…");
     const position = await requestCurrentPosition();
     const meters = distanceMeters(position.coords.latitude, position.coords.longitude, branchLocation.latitude, branchLocation.longitude);
-    if(meters > 150) return toast(`距離分店約 ${Math.round(meters)} 公尺，需在 150 公尺內`);
+    if(meters > 200) return toast("不能完成任務的原因：未在任務區（需在分店 200 公尺內）");
     xp += 300; completed += 1; streak = Math.max(streak, 1);
     localStorage.setItem("cq_xp", xp); localStorage.setItem("cq_completed", completed); localStorage.setItem("cq_streak", streak);
     await saveCloudProfile();
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/workouts`, { method:"POST", headers:{ ...authHeaders(), "Prefer":"return=minimal" }, body:JSON.stringify({ user_id:currentUser.id, class_name:c.name, xp_awarded:300, branch_name:selectedBranchName, city:selectedCity, class_start_at:start.toISOString(), verified:true, distance_meters:Math.round(meters) }) });
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/workouts`, { method:"POST", headers:{ ...authHeaders(), "Prefer":"return=minimal" }, body:JSON.stringify({ user_id:currentUser.id, class_name:c.name, xp_awarded:300, branch_name:context.branchName, city:context.city, class_start_at:start.toISOString(), verified:true, distance_meters:Math.round(meters) }) });
     if(!response.ok) throw new Error("完成紀錄同步失敗");
-    savedTasks = savedTasks.filter(task => !(task.branchId === selectedBranchId && task.date === selectedDate && task.time === c.time && task.name === c.name));
+    savedTasks = savedTasks.filter(task => !(task.branchId === context.branchId && task.date === context.date && task.time === c.time && task.name === c.name));
     localStorage.setItem("cq_saved_tasks", JSON.stringify(savedTasks));
     toast(`🎉 ${c.name} 已驗證完成！ +300 XP`); render("home");
   }catch(error){ toast(`⚠️ ${error.message}`); }
@@ -1197,6 +1219,8 @@ function render(
   tab = "home"
 ){
 
+  syncAvatar();
+
   document
     .querySelectorAll("[data-tab]")
     .forEach(button => {
@@ -1215,9 +1239,9 @@ function render(
 
     classes:"課表",
 
-    badges:"勳章",
+    badges:"成就",
 
-    social:"社群",
+    social:"統計",
 
     profile:"我的"
 
@@ -1310,7 +1334,7 @@ function home(){
         </h3>
 
         <span>
-          1 / 3
+          ${savedTasks.length} 項待解
         </span>
 
       </div>
@@ -1367,56 +1391,8 @@ function home(){
 
 
     <section class="section">
-
-      <div class="section-title">
-
-        <h3>
-          📅
-          ${
-            selectedBranchName ||
-            "選擇你的健身分店"
-          }
-        </h3>
-
-        <span>
-          ${schedule.length} 堂
-        </span>
-
-      </div>
-
-
-      ${
-        schedule.length
-
-          ? schedule
-              .slice(0,3)
-              .map(card)
-              .join("")
-
-          : `
-
-            <div class="muted">
-
-              ${
-                selectedBranchName &&
-                selectedDate
-
-                  ? `${formatDate(selectedDate)} 暫無課程資料`
-
-                  : "前往課表選擇分店與日期"
-
-              }
-
-            </div>
-
-          `
-      }
-
-    </section>
-
-    <section class="section">
-      <div class="section-title"><h3>🧩 等待解任務</h3><span>左滑可移除</span></div>
-      ${savedTasks.length ? `<div class="saved-task-list">${savedTasks.map((task, index) => `<div class="saved-task ${taskExpired(task) ? "expired" : ""}" data-task-index="${index}"><b>${escapeHtml(task.name)}${taskExpired(task) ? " · 已逾期" : ""}</b><span>${escapeHtml(task.branchName)} · ${task.date} ${task.time}${task.end ? `–${task.end}` : ""}</span></div>`).join("")}</div>` : `<div class="quest muted">從課表按「加入任務」，就會出現在這裡。</div>`}
+      <div class="section-title"><h3>🧩 待解任務</h3><span>左滑顯示刪除</span></div>
+      ${savedTasks.length ? `<div class="saved-task-list">${savedTasks.map((task, index) => `<div class="task-swipe" data-task-index="${index}"><button class="task-delete" type="button" onclick="removeTask(${index})">刪除</button><div class="saved-task ${taskExpired(task) ? "expired" : ""}"><b>${escapeHtml(bilingualCourseName(task.name))}${taskExpired(task) ? " · 已逾期" : ""}</b><span>${escapeHtml(task.branchName)} · ${task.date} ${task.time}${task.end ? `–${task.end}` : ""}</span>${taskExpired(task) ? "" : `<button class="primary" type="button" onclick="completeSavedTask(${index})">完成任務</button>`}</div></div>`).join("")}</div>` : `<div class="quest muted">從課表按「加入任務」，就會出現在這裡。</div>`}
     </section>
 
   `;
@@ -2281,7 +2257,7 @@ async function submitCommunityPost(event){
   const button = event.currentTarget.querySelector("button[type=submit]");
   button.disabled = true;
   try{
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/community_posts`, { method:"POST", headers:{ ...authHeaders(), "Prefer":"return=minimal" }, body:JSON.stringify({ user_id:currentUser.id, author_name:profileName || currentUser.email.split("@")[0], author_instagram:instagramHandle || null, city:socialCity, branch_name:branch.name, message }) });
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/community_posts`, { method:"POST", headers:{ ...authHeaders(), "Prefer":"return=minimal" }, body:JSON.stringify({ user_id:currentUser.id, author_name:profileName || currentUser.email.split("@")[0], author_instagram:null, city:socialCity, branch_name:branch.name, message }) });
     if(!response.ok) throw new Error("留言發布失敗");
     toast("留言已發布");
     social();
@@ -2308,6 +2284,63 @@ async function leaderboard(){
 // ========================================
 // 個人
 // ========================================
+
+async function adminRequest(action, payload = {}){
+  if(!authSession?.access_token) throw new Error("請先登入管理員帳號");
+  const response = await fetch("/api/admin", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "Authorization":`Bearer ${authSession.access_token}` },
+    body:JSON.stringify({ action, ...payload })
+  });
+  const result = await response.json().catch(() => ({}));
+  if(!response.ok) throw new Error(result.error || "後台服務暫時無法使用");
+  return result;
+}
+
+function renderAdminMembers(members = []){
+  const target = document.querySelector("#admin-members");
+  if(!target) return;
+  target.innerHTML = members.length ? members.map(member => `<div class="rank-row"><div><b>${escapeHtml(member.display_name || "未設定暱稱")}</b><div class="muted">XP ${Number(member.xp || 0)} · 已登入會員</div></div><button class="ghost danger" type="button" onclick="deleteMember('${member.id}')">移除</button></div>`).join("") : `<div class="muted">找不到符合的會員</div>`;
+}
+
+async function findMembers(event){
+  event?.preventDefault();
+  const input = document.querySelector("#admin-member-query");
+  try{
+    const result = await adminRequest("members", { query:input?.value || "" });
+    const count = document.querySelector("#member-count");
+    if(count) count.textContent = `${result.total || 0} 位會員`;
+    renderAdminMembers(result.members || []);
+  }catch(error){ toast(`⚠️ ${error.message}`); }
+}
+
+async function deleteMember(id){
+  if(!confirm("確定要移除此會員及其完成紀錄嗎？這個動作無法復原。")) return;
+  try{
+    await adminRequest("delete_member", { id });
+    toast("會員已移除");
+    findMembers();
+  }catch(error){ toast(`⚠️ ${error.message}`); }
+}
+
+async function clearStatistics(){
+  if(!confirm("確定要清空所有排行榜統計、完成紀錄與 XP 嗎？會員帳號不會被刪除，這個動作無法復原。")) return;
+  try{
+    await adminRequest("clear_statistics");
+    toast("統計資料已清空");
+    findMembers();
+  }catch(error){ toast(`⚠️ ${error.message}`); }
+}
+
+function openAdmin(){
+  if(!isAdmin) return toast("你沒有後台管理權限");
+  content.innerHTML = `
+    <section class="hero profile-card"><div class="big-avatar">管</div><h2>後台管理</h2><div class="muted">僅限管理員使用；清除與移除操作皆無法復原。</div></section>
+    <section class="section"><div class="quest"><div class="section-title"><h3>會員管理</h3><span id="member-count">載入中…</span></div><form class="admin-search" onsubmit="findMembers(event)"><input id="admin-member-query" maxlength="40" placeholder="用暱稱搜尋會員"><button class="primary" type="submit">查詢</button></form><div id="admin-members" class="admin-members"><div class="muted">正在載入會員資料…</div></div></div></section>
+    <section class="section"><div class="quest"><h3>統計資料</h3><p class="muted">清空排行榜、完成紀錄、XP 與連續天數；不會刪除會員帳號。</p><button class="ghost danger" type="button" onclick="clearStatistics()">清空統計數據</button></div></section>
+    <section class="section"><button class="ghost" type="button" onclick="nav('profile')">返回我的</button></section>`;
+  findMembers();
+}
 
 function profile(){
 
@@ -2392,9 +2425,8 @@ function profile(){
 
     <section class="section">
       <form class="quest profile-settings" onsubmit="updateProfile(event)">
-        <div class="section-title"><h3>⚙️ 個人設定</h3><span>公開在社群留言</span></div>
+        <div class="section-title"><h3>⚙️ 個人設定</h3><span>同步你的帳號資料</span></div>
         <label>暱稱<input name="display_name" maxlength="40" required value="${escapeHtml(profileName || currentUser.email.split("@")[0])}"></label>
-        <label>Instagram 帳號（選填）<input name="instagram" maxlength="30" autocomplete="off" placeholder="例如 cardio_taiwan" value="${escapeHtml(instagramHandle)}"></label>
         <label>介面主色<select name="theme_color">
           <option value="#ff4f86" ${themeColor === "#ff4f86" ? "selected" : ""}>桃紅</option>
           <option value="#7c5cff" ${themeColor === "#7c5cff" ? "selected" : ""}>紫藍</option>
@@ -2407,7 +2439,7 @@ function profile(){
     </section>
 
     <section class="section">
-      <button class="ghost" onclick="signOut()">登出帳號</button>
+      <div class="account-actions"><button class="ghost" onclick="signOut()">登出帳號</button>${isAdmin ? `<button class="ghost" type="button" onclick="openAdmin()">後台管理</button>` : ""}</div>
     </section>
 
 
